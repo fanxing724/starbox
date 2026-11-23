@@ -83,7 +83,7 @@ class Yidong139Drive : Drive {
     /** 等价 JS encodeURIComponent：空格→%20，保留 ! ' ( ) * */
     private fun encodeUriComponent(s: String): String {
         var out = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
-        listOf("%21" to "!", "%27" to "'", "%28" to "(", "%29" to ")", "%2A" to "*")
+        listOf("%21" to "!", "%27" to "'", "%28" to "(", "%29" to ")", "%2A" to "*", "%7E" to "~")
             .forEach { (a, b) -> out = out.replace(a, b) }
         return out
     }
