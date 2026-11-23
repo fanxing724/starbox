@@ -328,11 +328,71 @@ class QuarkDrive : Drive {
         return out
     }
 
+
+    // ---------------- 快传线路（官方第二通道） ----------------
+
+    private val socialApi = "https://drive-social-api.quark.cn"
+    @Volatile private var socialToken: String = ""
+    @Volatile private var socialExpire: Long = 0
+
+    /**
+     * 取快传令牌。夸克除普通下载外还有一条「快传」通道，
+     * 取链时带 token + speedup_session 即走该线路，速度档位可能不同。
+     * 令牌有效期短，留 60s 缓冲。
+     */
+    private fun socialToken(): String {
+        val now = System.currentTimeMillis()
+        if (socialToken.isNotBlank() && socialExpire > now + 60_000) return socialToken
+        val ts = now / 1000
+        val body = JSONObject()
+            .put("conversation_id", "300000$ts")
+            .put("conversation_type", 3)
+            .put("msg_id", "${ts}000")
+        val url = "$socialApi/1/clouddrive/chat/conv/file/acquire_dl_token" +
+            "?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761&fr=win&la=zh-CN&ch=pckk%40product_guanwan"
+        val b = Request.Builder().url(url).post(Http.json(body.toString()))
+            .header("Cookie", loginCookie)
+            .header("User-Agent", uaPcNew)
+            .header("Content-Type", "application/json")
+            .header("Origin", "https://pan.quark.cn")
+            .header("Referer", "https://pan.quark.cn/")
+        Http.api.newCall(b.build()).execute().use { r ->
+            val txt = r.body?.string() ?: ""
+            val j = runCatching { JSONObject(txt) }.getOrNull()
+            val tk = j?.optJSONObject("data")?.optString("token") ?: ""
+            if (tk.isBlank()) {
+                com.fanxing.xbox.store.AppLog.w(
+                    "Quark", "快传令牌获取失败 HTTP ${r.code} code=${j?.optInt("code")} msg=${j?.optString("message")}"
+                )
+                return ""
+            }
+            socialToken = tk
+            socialExpire = j?.optJSONObject("data")?.optLong("expired_timestamp") ?: (now + 300_000)
+            com.fanxing.xbox.store.AppLog.i("Quark", "快传令牌已取，走快传线路")
+            return tk
+        }
+    }
+
     private fun personalLink(file: RemoteFile): DirectLink {
-        val j = authPost(
+        val tk = runCatching { socialToken() }.getOrDefault("")
+        val body = JSONObject().put("fids", JSONArray().put(file.id))
+        if (tk.isNotBlank()) {
+            // 快传线路：官方第二下载通道
+            body.put("speedup_session", "").put("token", tk)
+        }
+        var j = authPost(
             "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
-            JSONObject().put("fids", JSONArray().put(file.id))
+            body
         )
+        // 快传失败则退回普通线路，不能因为加速通道不可用就下不了
+        if (j.optInt("code") != 0 && tk.isNotBlank()) {
+            com.fanxing.xbox.store.AppLog.w("Quark", "快传线路取链失败，回退普通线路")
+            socialToken = ""; socialExpire = 0
+            j = authPost(
+                "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
+                JSONObject().put("fids", JSONArray().put(file.id))
+            )
+        }
         val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
         com.fanxing.xbox.store.AppLog.i("Quark", "个人盘取链 fid=${file.id} → ${if (url.isBlank()) "失败 code=" + j.optInt("code") + " " + j.optString("message") else "OK"}")
         if (url.isBlank()) throw DriveError("夸克：个人盘取直链失败 ${j.optString("message")}")
