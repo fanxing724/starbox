@@ -24,6 +24,7 @@ class XunleiDrive : Drive {
     override val name = "迅雷网盘"
     override val loginUrl = "https://pan.xunlei.com/"
     override val desc = "免登录可解析分享。下载需登录；支持 20+ CDN 镜像节点并发"
+    override val guestParse = true
     override val cookieDomain = "https://pan.xunlei.com"
 
     private val auth = "https://xluser-ssl.xunlei.com"

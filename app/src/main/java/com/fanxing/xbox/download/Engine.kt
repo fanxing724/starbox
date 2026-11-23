@@ -271,7 +271,7 @@ object Engine {
                 // 完工校验：分片覆盖 + 实际落盘长度都必须等于文件总长
                 val covered = t.chunks.sumOf { it.length }
                 val actual = runCatching { sink.length() }.getOrDefault(-1L)
-                if (covered != t.size || (actual >= 0 && actual != t.size)) {
+                if (!ChunkMath.covers(t.chunks, t.size) || (actual >= 0 && actual != t.size)) {
                     t.state = State.ERROR
                     t.error = "长度校验失败：分片 $covered / 落盘 $actual / 期望 ${t.size}"
                 } else {
@@ -331,21 +331,12 @@ object Engine {
 
     private fun buildChunks(t: Task, conns: Int) {
         t.chunks.clear()
-        val n = conns.coerceAtLeast(1)
-        val per = t.size / n
-        for (i in 0 until n) {
-            val start = i * per
-            val end = if (i == n - 1) t.size - 1 else start + per - 1
-            if (start <= end) t.chunks.add(Chunk(i, start, end))
-        }
+        t.chunks.addAll(ChunkMath.plan(t.size, conns))
         persist(t)
     }
 
     private fun normalizeChunks(t: Task) {
-        t.chunks.forEach { c ->
-            if (c.done > c.length) c.done = c.length
-            if (c.done < 0) c.done = 0
-        }
+        t.chunks.forEach { c -> c.done = ChunkMath.clampDone(c.done, c.length) }
     }
 
     private suspend fun fetchChunk(t: Task, c: Chunk, sink: Sink) {
@@ -369,18 +360,8 @@ object Engine {
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
                     } else {
                         // 206 要完整校验区间：起点、终点、总大小
-                        val cr = r.header("Content-Range")
-                        val m = cr?.let { Regex("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)").find(it) }
-                        if (m != null) {
-                            val s = m.groupValues[1].toLong()
-                            val e = m.groupValues[2].toLong()
-                            val tot = m.groupValues[3]
-                            if (s != from) throw DriveErr("分片 ${c.index} 起点错位：期望 $from 实得 $s")
-                            if (e > c.end) throw DriveErr("分片 ${c.index} 响应区间超出请求范围")
-                            if (tot != "*" && tot.toLong() != t.size) {
-                                throw DriveErr("文件大小不符：期望 ${t.size} 实得 $tot")
-                            }
-                        }
+                        ChunkMath.checkRange(r.header("Content-Range"), from, c.end, t.size)
+                            ?.let { throw DriveErr("分片 ${c.index} $it") }
                     }
                     val body = r.body ?: throw DriveErr("分片 ${c.index} 空响应")
                     run {
@@ -388,12 +369,11 @@ object Engine {
                         val buf = ByteArray(64 * 1024)
                         val input = body.byteStream()
                         while (!t.cancelFlag.get()) {
-                            val remain = c.end - pos + 1
-                            if (remain <= 0) break
                             val n = input.read(buf)
                             if (n <= 0) break
                             // 限长写入：服务器多发也不能越过本片边界去踩相邻分片
-                            val want = minOf(n.toLong(), remain).toInt()
+                            val want = ChunkMath.writable(n, pos, c.end)
+                            if (want <= 0) break
                             sink.writeAt(pos, buf, want)
                             pos += want
                             c.done += want

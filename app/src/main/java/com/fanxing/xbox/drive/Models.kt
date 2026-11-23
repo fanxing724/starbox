@@ -43,6 +43,13 @@ interface Drive {
     /** 该网盘的特点说明（展示在「支持列表」里） */
     val desc: String get() = ""
 
+    /**
+     * 是否支持游客解析（不登录就能列文件）。
+     * 注意与 loginUrl 区分：很多盘配了登录页只是为了「可选登录/下载需要」，
+     * 用 loginUrl==null 判断会把它们误标成「需登录」。
+     */
+    val guestParse: Boolean get() = loginUrl == null
+
     fun match(url: String): Boolean
     fun parse(url: String): ShareRef
 
@@ -71,16 +78,20 @@ class DriveError(message: String) : Exception(message)
 fun expandMirrors(url: String, mirrors: List<String>, limit: Int = 8): List<String> {
     if (mirrors.isEmpty()) return listOf(url)
     val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return listOf(url)
-    val host = uri.host
-    if (host.isNullOrBlank()) return listOf(url)
-    // 只重建 authority：String.replace 会连 path/query 里出现的同名串一起换掉，
-    // 而签名 URL 常把 host 回写进参数，一改签名就废。
-    return (listOf(url) + mirrors.take(limit).map { node ->
-        runCatching {
-            java.net.URI(
-                uri.scheme, uri.userInfo, node, uri.port,
-                uri.path, uri.query, uri.fragment
-            ).toString()
-        }.getOrDefault(url)
-    }).distinct()
+    if (uri.host.isNullOrBlank() || uri.scheme.isNullOrBlank()) return listOf(url)
+
+    // 必须用 raw* 分量原样拼接。
+    // java.net.URI 的多参构造器收的是「已解码」串再重新编码，
+    // 会把签名里的 %2B 变成 +（+ 在 query 里合法），签名照样失效。
+    fun rebuild(host: String): String = buildString {
+        append(uri.scheme).append("://")
+        uri.rawUserInfo?.let { append(it).append('@') }
+        append(host)
+        if (uri.port != -1) append(':').append(uri.port)
+        uri.rawPath?.let { append(it) }
+        uri.rawQuery?.let { append('?').append(it) }
+        uri.rawFragment?.let { append('#').append(it) }
+    }
+
+    return (listOf(url) + mirrors.take(limit).map { rebuild(it) }).distinct()
 }

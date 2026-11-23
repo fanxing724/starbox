@@ -20,6 +20,7 @@ class PikPakDrive : Drive {
     override val name = "PikPak"
     override val loginUrl = "https://mypikpak.com/"
     override val desc = "免登录可列目录。下载需登录（分享文件要先转存）"
+    override val guestParse = true
     override val cookieDomain = "https://mypikpak.com"
 
     private val api = "https://api-drive.mypikpak.com"

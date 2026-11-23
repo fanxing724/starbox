@@ -21,8 +21,8 @@ android {
         applicationId = "com.fanxing.xbox"
         minSdk = 24
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.9.13"
+        versionCode = 24
+        versionName = "0.9.14"
     }
 
     signingConfigs {
@@ -73,4 +73,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
     // PDF 预览用系统自带 android.graphics.pdf.PdfRenderer，零依赖
+
+    testImplementation("junit:junit:4.13.2")
 }

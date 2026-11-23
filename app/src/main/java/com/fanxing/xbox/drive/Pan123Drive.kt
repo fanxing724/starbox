@@ -20,6 +20,7 @@ class Pan123Drive : Drive {
     override val name = "123 云盘"
     override val loginUrl = "https://www.123pan.com/login/"
     override val desc = "免登录。列表接口要求 Dart UA，重名文件自动加序号"
+    override val guestParse = true
     override val cookieDomain = "https://www.123pan.com"
 
     private val api = "https://yun.123pan.cn"

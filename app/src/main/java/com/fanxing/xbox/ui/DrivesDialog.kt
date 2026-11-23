@@ -27,8 +27,8 @@ object DrivesDialog {
 
         val creds = Creds.get(ctx)
         val all = Registry.all
-        val free = all.filter { it.loginUrl == null }.sortedBy { it.name }
-        val need = all.filter { it.loginUrl != null }.sortedBy { it.name }
+        val free = all.filter { it.guestParse }.sortedBy { it.name }
+        val need = all.filter { !it.guestParse }.sortedBy { it.name }
 
         val box = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -59,7 +59,7 @@ object DrivesDialog {
         }
 
         fun row(d: Drive) {
-            val needLogin = d.loginUrl != null
+            val needLogin = !d.guestParse
             val logged = creds.has(d.id)
 
             val line = LinearLayout(ctx).apply {
@@ -124,9 +124,9 @@ object DrivesDialog {
             box.addView(line)
         }
 
-        section("免登录 · 粘贴链接即可用")
+        section("免登录解析 · 粘贴链接即可列文件")
         free.forEach { row(it) }
-        section("需登录 · 点整行去登录")
+        section("需登录解析 · 点整行去登录")
         need.forEach { row(it) }
 
         AlertDialog.Builder(ctx)
