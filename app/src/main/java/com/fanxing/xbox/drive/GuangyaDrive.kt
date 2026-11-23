@@ -15,7 +15,7 @@ class GuangyaDrive : Drive {
 
     override val id = "guangya"
     override val name = "光鸭云盘"
-    override val loginUrl = "https://www.guangyapan.com/"
+    override val loginUrl = "https://www.guangyapan.com/login"
     override val desc = "免登录（取决于分享者是否开启免登录下载）"
     override val cookieDomain = "https://www.guangyapan.com"
 

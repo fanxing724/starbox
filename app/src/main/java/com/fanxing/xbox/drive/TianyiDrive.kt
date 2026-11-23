@@ -17,7 +17,7 @@ class TianyiDrive : Drive {
 
     override val id = "tianyi"
     override val name = "天翼云盘"
-    override val loginUrl = "https://cloud.189.cn/"
+    override val loginUrl = "https://cloud.189.cn/web/login.html"
     override val desc = "免登录。有访问码的分享需带 share_ 会话 Cookie"
     override val cookieDomain = "https://cloud.189.cn"
 

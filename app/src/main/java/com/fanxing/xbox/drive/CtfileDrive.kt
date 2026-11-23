@@ -13,7 +13,7 @@ class CtfileDrive : Drive {
 
     override val id = "ctfile"
     override val name = "城通网盘"
-    override val loginUrl = "https://www.ctfile.com/"
+    override val loginUrl = "https://home.ctfile.com/"
     override val desc = "免登录。VIP 文件走多条 CDN 线路，可并发加速"
     override val cookieDomain = "https://www.ctfile.com"
 

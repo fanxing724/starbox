@@ -3,6 +3,7 @@ package com.fanxing.xbox.ui
 import android.annotation.SuppressLint
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -50,9 +51,36 @@ class LoginActivity : AppCompatActivity() {
         b.web.settings.setSupportZoom(true)
         b.web.settings.builtInZoomControls = true
         b.web.settings.displayZoomControls = false
+        b.web.settings.textZoom = 100
+
+        // ★ 拦掉「下载客户端」：官网/登录页常挂 APK 直链或应用商店跳转，
+        //   点一下就触发下载。这里一律拦下，只保留网页导航。
+        b.web.setDownloadListener { _, _, _, _, _ ->
+            Toast.makeText(this, "已拦截客户端下载，请在网页内完成登录", Toast.LENGTH_SHORT).show()
+        }
+
         b.web.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val u = request?.url ?: return false
+                val scheme = u.scheme?.lowercase() ?: ""
+                // 非 http(s)（intent:// market:// 等）会拉起应用商店/客户端，直接拦掉
+                if (scheme != "http" && scheme != "https") {
+                    Toast.makeText(this@LoginActivity, "已拦截外部跳转", Toast.LENGTH_SHORT).show()
+                    return true
+                }
+                val path = u.path?.lowercase() ?: ""
+                if (path.endsWith(".apk") || path.endsWith(".exe") || path.endsWith(".dmg")) {
+                    Toast.makeText(this@LoginActivity, "已拦截安装包下载", Toast.LENGTH_SHORT).show()
+                    return true
+                }
+                return false   // 其余留在 WebView 内，避免跳系统浏览器丢 Cookie
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 cm.flush()
+                // ★ 强制桌面宽度视口：部分登录页带 device-width 的 viewport，
+                //   在窄屏上会把桌面布局裁掉一半。改成固定宽度后配合 overview 缩放即可显示完整。
+                view?.evaluateJavascript(VIEWPORT_JS, null)
             }
         }
         b.web.loadUrl(loginUrl)
@@ -89,6 +117,18 @@ class LoginActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** 强制桌面宽度视口，避免登录页在窄屏被裁切 */
+        val VIEWPORT_JS = """
+            (function(){
+              try{
+                var m=document.querySelector('meta[name=viewport]');
+                if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');
+                       (document.head||document.documentElement).appendChild(m);}
+                m.setAttribute('content','width=1280, user-scalable=yes');
+              }catch(e){}
+            })()
+        """.trimIndent()
+
         /** 登录一律用电脑版 UA，手机 UA 会导致网页登录不可用 */
         const val DESKTOP_UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
