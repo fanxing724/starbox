@@ -32,6 +32,12 @@ class QuarkDrive : Drive {
             "(KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 " +
             "Electron/18.3.5.12-a038f7b798 Safari/537.36 Channel/pckk_other_ch"
 
+    /** 新版 PC 客户端 UA：登录态取链用，速度档位可能优于旧版 */
+    private val uaPcNew =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 " +
+            "QuarkPC/6.9.7.761 QuarkCloudDrivePC/6.9.7.761 quark-cloud-drive/2.5.40"
+
     private val uaGuest =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) uc-cloud-drive/2.5.20 Chrome/100.0.4896.160 " +
@@ -198,7 +204,7 @@ class QuarkDrive : Drive {
         com.fanxing.xbox.store.AppLog.d("Quark", "POST ${url.substringAfter("/1/clouddrive/").substringBefore("?")}")
         val b = Request.Builder().url(url).post(Http.json(body.toString()))
             .header("Cookie", ck)
-            .header("User-Agent", uaQuark)
+            .header("User-Agent", uaPcNew)
             .header("Origin", "https://pan.quark.cn")
             .header("Referer", "https://pan.quark.cn/")
             .header("Content-Type", "application/json;charset=UTF-8")
@@ -220,7 +226,7 @@ class QuarkDrive : Drive {
         if (ck.isBlank()) throw DriveError("夸克：需要先登录")
         val b = Request.Builder().url(url).get()
             .header("Cookie", ck)
-            .header("User-Agent", uaQuark)
+            .header("User-Agent", uaPcNew)
             .header("Referer", "https://pan.quark.cn/")
         Http.api.newCall(b.build()).execute().use { r ->
             val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
@@ -324,7 +330,7 @@ class QuarkDrive : Drive {
 
     private fun personalLink(file: RemoteFile): DirectLink {
         val j = authPost(
-            "$api/1/clouddrive/file/download?pr=ucpro&fr=pc",
+            "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
             JSONObject().put("fids", JSONArray().put(file.id))
         )
         val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
@@ -333,7 +339,7 @@ class QuarkDrive : Drive {
         return DirectLink(
             url,
             mapOf(
-                "User-Agent" to uaQuark,
+                "User-Agent" to uaPcNew,
                 "Referer" to "https://pan.quark.cn/",
                 "Cookie" to loginCookie
             )
