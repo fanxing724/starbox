@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/action_drives"
-        android:icon="@drawable/ic_info"
+        android:icon="@drawable/ic_list"
         android:title="支持的网盘"
         app:showAsAction="always" />
 </menu>

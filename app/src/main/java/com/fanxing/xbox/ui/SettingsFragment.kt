@@ -58,17 +58,12 @@ class SettingsFragment : Fragment() {
             pickColor()
         }
 
-        section("网盘登录")
-        Registry.all.forEach { d ->
-            val state = when {
-                d.loginUrl == null -> "免登录"
-                creds.has(d.id) -> "已登录"
-                else -> "未登录"
-            }
-            row(d.name, if (d.loginUrl == null) "游客可直接解析下载" else "点击打开网页登录", state) {
-                if (d.loginUrl == null) toast("${d.name} 无需登录")
-                else startActivity(Intent(requireContext(), LoginActivity::class.java).putExtra("drive", d.id))
-            }
+        section("网盘")
+        val needLogin = Registry.all.filter { it.loginUrl != null }
+        val logged = needLogin.count { creds.has(it.id) }
+        row("网盘登录", "点击查看全部 ${Registry.all.size} 家网盘与登录状态",
+            "$logged/${needLogin.size} 已登录") {
+            DrivesDialog.show(requireActivity())
         }
 
         section("关于")
@@ -77,7 +72,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.7 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.8 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {

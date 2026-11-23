@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
         settings = fm.findFragmentByTag(TAG_SETTINGS) as? SettingsFragment ?: SettingsFragment()
 
         b.toolbar.setOnMenuItemClickListener { item ->
-            if (item.itemId == R.id.action_drives) { showSupported(); true } else false
+            if (item.itemId == R.id.action_drives) { DrivesDialog.show(this); true } else false
         }
 
         b.nav.setOnItemSelectedListener { item ->
@@ -110,102 +110,6 @@ class MainActivity : AppCompatActivity() {
             show(id)
         }
     }
-
-    /** 支持的网盘列表：标注免登录/需登录与各自特点 */
-    private fun showSupported() {
-        val box = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 8)
-        }
-
-        // 统计
-        val all = com.fanxing.xbox.drive.Registry.all
-        val free = all.count { it.loginUrl == null }
-        val need = all.size - free
-        box.addView(android.widget.TextView(this).apply {
-            text = "共 ${all.size} 家 · $free 家免登录 · $need 家需登录"
-            textSize = 12f
-            setTextColor(resources.getColor(com.fanxing.xbox.R.color.text_sub, null))
-            setPadding(0, 0, 0, dp(10))
-        })
-
-        all.forEach { d ->
-            val row = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, dp(9), 0, dp(9))
-            }
-            // 名称 + 登录标记
-            val nameBox = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-                )
-            }
-            val titleRow = android.widget.LinearLayout(this).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-            titleRow.addView(android.widget.TextView(this).apply {
-                text = d.name
-                textSize = 15f
-                setTextColor(resources.getColor(com.fanxing.xbox.R.color.text_main, null))
-            })
-            val needLogin = d.loginUrl != null
-            titleRow.addView(android.widget.TextView(this).apply {
-                text = if (needLogin) "  需登录" else "  免登录"
-                textSize = 11f
-                setPadding(dp(6), dp(2), dp(6), dp(2))
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = dp(8).toFloat()
-                    setColor(
-                        resources.getColor(
-                            if (needLogin) com.fanxing.xbox.R.color.brand_container
-                            else com.fanxing.xbox.R.color.surface_alt, null
-                        )
-                    )
-                }
-                setTextColor(
-                    resources.getColor(
-                        if (needLogin) com.fanxing.xbox.R.color.on_brand_container
-                        else com.fanxing.xbox.R.color.text_sub, null
-                    )
-                )
-            })
-            nameBox.addView(titleRow)
-            if (d.desc.isNotBlank()) {
-                nameBox.addView(android.widget.TextView(this).apply {
-                    text = d.desc
-                    textSize = 11f
-                    setTextColor(resources.getColor(com.fanxing.xbox.R.color.text_sub, null))
-                    setPadding(0, dp(3), 0, 0)
-                })
-            }
-            row.addView(nameBox)
-            row.addView(android.widget.TextView(this).apply {
-                text = if (needLogin) "去登录" else ""
-                textSize = 12f
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                setOnClickListener {
-                    if (d.loginUrl != null) {
-                        startActivity(
-                            android.content.Intent(this@MainActivity, LoginActivity::class.java)
-                                .putExtra("drive", d.id)
-                        )
-                    }
-                }
-            })
-            box.addView(row)
-        }
-
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("支持的网盘")
-            .setView(android.widget.ScrollView(this).apply { addView(box) })
-            .setPositiveButton("知道了", null)
-            .show()
-    }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     /** 首次启动（或协议更新后）必须先同意，否则退出 */
     private fun maybeShowLegalGate() {
