@@ -94,87 +94,156 @@ class UcDrive : Drive {
         return st
     }
 
+    /**
+     * 列表必须走 **transfer_share/detail**（GET + query 带 stoken）。
+     *
+     * ★ 这是 41020「转存文件 token 校验异常」的根因：
+     *   sharepage/v2/detail 返回的 share_fid_token 与 file/download?entry=ft
+     *   所用的 stoken **不绑定**，拿它去取链一定报 token 校验异常。
+     *   只有 transfer_share/detail 给出的 token 才配套。
+     */
     override fun list(share: ShareRef, dir: RemoteFile?): List<RemoteFile> {
-        val st = stoken(share)
         val out = ArrayList<RemoteFile>()
         var page = 1
+        var st = stoken(share)
+        var retried = false
         while (page <= 50) {
-            val body = JSONObject()
-                .put("pwd_id", share.key)
-                .put("stoken", st)
-                .put("passcode", share.passcode)
-                .put("pdir_fid", dir?.id ?: "0")
-                .put("force", 0)
-                .put("page", page)
-                .put("size", 100)
-                .put("fetch_banner", 1)
-                .put("fetch_share", 1)
-                .put("fetch_total", 1)
-                .put("sort", "file_type:asc,file_name:asc")
-                .put("banner_platform", "other")
-                .put("web_platform", "windows")
-                .put("fetch_error_background", 1)
-            val j = post(
-                "$api/1/clouddrive/share/sharepage/v2/detail?pr=UCBrowser&fr=pc&ve=2.5.20",
-                body
-            )
-            val d = j.optJSONObject("data")
-                ?: throw DriveError("UC：列表失败 ${j.optInt("code")} ${j.optString("message")}")
-            val arr: JSONArray = d.optJSONObject("detail_info")?.optJSONArray("list")
-                ?: d.optJSONArray("list") ?: JSONArray()
+            val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
+            val url = "$api/1/clouddrive/transfer_share/detail?entry=ft&fr=pc&pr=UCBrowser" +
+                "&pwd_id=${share.key}&passcode=${enc(share.passcode)}&stoken=${enc(st)}" +
+                "&pdir_fid=${dir?.id ?: "0"}&fetch_file_list=1" +
+                "&_page=$page&_size=100&_fetch_total=1&_fetch_share=1" +
+                "&_sort=file_type:asc,file_name:asc"
+
+            val b = Request.Builder().url(url).get()
+            browserHeaders().forEach { (k, v) -> b.header(k, v) }
+            val j = exec(b.build())
+            val code = j.optInt("code")
+            val msg = j.optString("message")
+
+            // stoken 失效：重取一次再来
+            if ((code == 14001 || msg.contains("token", true)) && !retried) {
+                retried = true
+                share.extra.remove("stoken")
+                st = stoken(share)
+                continue
+            }
+            if (code != 0) throw DriveError("UC：列表失败 [$code] $msg")
+
+            val d = j.optJSONObject("data") ?: break
+            val arr = d.optJSONArray("list")
+                ?: d.optJSONObject("detail_info")?.optJSONArray("list")
+                ?: JSONArray()
             if (arr.length() == 0) break
             for (i in 0 until arr.length()) {
                 val it = arr.getJSONObject(i)
+                // 官方用 file 布尔判定，不是 dir
+                val isFile = it.optBoolean("file", true)
                 out.add(
                     RemoteFile(
                         id = it.optString("fid"),
-                        name = it.optString("file_name"),
+                        name = it.optString("file_name").ifBlank { it.optString("name") },
                         size = it.optLong("size"),
-                        isDir = it.optBoolean("dir", false),
+                        isDir = !isFile,
                         path = it.optString("file_name"),
-                        meta = mapOf("fid_token" to it.optString("share_fid_token"))
+                        meta = mapOf(
+                            "fid_token" to it.optString("share_fid_token"),
+                            "stoken" to st,
+                            "pdir" to (dir?.id ?: "0")
+                        )
                     )
                 )
             }
-            val total = d.optJSONObject("metadata")?.optInt("_total", 0) ?: 0
-            if (total > 0 && out.size >= total) break
             if (arr.length() < 100) break
             page++
         }
         return out
     }
 
+    /** 列表接口用的浏览器头（与游客取链头不同） */
+    private fun browserHeaders(): Map<String, String> {
+        val m = linkedMapOf(
+            "User-Agent" to
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept" to "application/json, text/plain, */*",
+            "Accept-Language" to "zh-CN,zh;q=0.9,en;q=0.8",
+            "Origin" to "https://drive.uc.cn",
+            "Referer" to "https://drive.uc.cn/",
+            "Content-Type" to "application/json;charset=UTF-8"
+        )
+        val ck = loginCookie
+        if (ck.isNotBlank()) m["Cookie"] = ck
+        return m
+    }
+
+    private fun exec(req: Request): JSONObject {
+        Http.api.newCall(req).execute().use { r ->
+            capturePugs(r.headers("Set-Cookie"))
+            val txt = r.body?.string() ?: throw DriveError("UC：空响应")
+            return runCatching { JSONObject(txt) }.getOrElse {
+                throw DriveError("UC：响应非 JSON（HTTP ${r.code}）")
+            }
+        }
+    }
+
     override fun link(share: ShareRef, file: RemoteFile): DirectLink {
         // 已转存到自己网盘的文件走登录态取链
         if (file.meta["personal"] == "1") return personalLink(file)
-        val st = stoken(share)
-        val body = JSONObject()
-            .put("fids", JSONArray().put(file.id))
-            .put("pwd_id", share.key)
-            .put("stoken", st)
-            .put("fids_token", JSONArray().put(file.meta["fid_token"] ?: ""))
-        val j = post("$api/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser", body)
-        val data = j.optJSONArray("data")
-        val url = data?.optJSONObject(0)?.optString("download_url") ?: ""
-        if (url.isBlank()) {
+
+        // ★ 必须用「产出这个 fid_token 的那一个 stoken」，不能用当前缓存的
+        var st = file.meta["stoken"] ?: stoken(share)
+        var fidToken = file.meta["fid_token"] ?: ""
+        var refreshed = false
+
+        while (true) {
+            val body = JSONObject()
+                .put("fids", JSONArray().put(file.id))
+                .put("pwd_id", share.key)
+                .put("stoken", st)
+                .put("fids_token", JSONArray().put(fidToken))
+            val j = post("$api/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser", body)
             val code = j.optInt("code")
-            val hint = when (code) {
-                23018 -> "文件太大，超出游客下载限制"
-                31001 -> "需要登录"
-                41017 -> "游客不能下载，需登录转存"
-                else -> j.optString("message")
+            val msg = j.optString("message")
+
+            // token 不配套/过期：重取 stoken 并重新列一次目录拿配套 token
+            if ((code == 41020 || code == 14001 || msg.contains("token", true)) && !refreshed) {
+                refreshed = true
+                share.extra.remove("stoken")
+                st = stoken(share)
+                val parent = file.meta["pdir"]?.let {
+                    if (it == "0") null else RemoteFile(it, "", 0, true)
+                }
+                val fresh = runCatching { list(share, parent) }.getOrNull()
+                    ?.firstOrNull { it.id == file.id }
+                if (fresh != null) {
+                    fidToken = fresh.meta["fid_token"] ?: ""
+                    st = fresh.meta["stoken"] ?: st
+                    continue
+                }
             }
-            throw DriveError("UC：取直链失败 [$code] $hint")
-        }
-        if (pugs.isBlank()) throw DriveError("UC：未拿到游客令牌 __pugs")
-        return DirectLink(
-            url = url,
-            headers = mapOf(
-                "User-Agent" to guestUa,
-                "Referer" to "https://drive.uc.cn/",
-                "Cookie" to "__pugs=$pugs"
+
+            val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
+            if (url.isBlank()) {
+                val hint = when (code) {
+                    23018 -> "文件太大，超出游客下载限制，请用「转存后下载」"
+                    31001 -> "需要登录 UC"
+                    41017 -> "游客不能下载，请登录后用「转存后下载」"
+                    41020 -> "分享令牌校验失败，请重新解析该链接"
+                    else -> msg
+                }
+                throw DriveError("UC：取直链失败 [$code] $hint")
+            }
+            if (pugs.isBlank()) throw DriveError("UC：未拿到游客令牌 __pugs")
+            return DirectLink(
+                url = url,
+                headers = mapOf(
+                    "User-Agent" to guestUa,
+                    "Referer" to "https://drive.uc.cn/",
+                    "Cookie" to "__pugs=$pugs"
+                )
             )
-        )
+        }
     }
 
     // ---------------- 一键转存下载 ----------------
