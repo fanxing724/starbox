@@ -25,6 +25,7 @@ class QuarkDrive : Drive {
     override val cookieDomain = "https://pan.quark.cn"
 
     private val api = "https://drive-pc.quark.cn"
+    private val TEMP_DIR = "starbox临时转存"
 
     private val uaQuark =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -212,15 +213,60 @@ class QuarkDrive : Drive {
         }
     }
 
+
+    /** 登录态 GET（查个人盘目录用） */
+    private fun authGet(url: String): JSONObject {
+        val ck = loginCookie
+        if (ck.isBlank()) throw DriveError("夸克：需要先登录")
+        val b = Request.Builder().url(url).get()
+            .header("Cookie", ck)
+            .header("User-Agent", uaQuark)
+            .header("Referer", "https://pan.quark.cn/")
+        Http.api.newCall(b.build()).execute().use { r ->
+            val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
+            return runCatching { JSONObject(txt) }.getOrElse {
+                throw DriveError("夸克：响应非 JSON（HTTP ${r.code}）")
+            }
+        }
+    }
+
+    /** 根目录下按名字找已存在的文件夹 */
+    private fun findOwnFolder(name: String): String? = runCatching {
+        val j = authGet(
+            "$api/1/clouddrive/file/sort?pr=ucpro&fr=pc&pdir_fid=0" +
+                "&_page=1&_size=200&_sort=file_type:asc,file_name:asc"
+        )
+        val arr = j.optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
+        for (i in 0 until arr.length()) {
+            val it = arr.getJSONObject(i)
+            val isDir = it.optBoolean("dir", false) || !it.optBoolean("file", true)
+            if (isDir && it.optString("file_name") == name) return@runCatching it.optString("fid")
+        }
+        null
+    }.getOrNull()
+
     private fun tempDir(): String {
         val j = authPost(
             "$api/1/clouddrive/file?pr=ucpro&fr=pc",
-            JSONObject().put("pdir_fid", "0").put("file_name", "starbox临时转存")
+            JSONObject().put("pdir_fid", "0").put("file_name", TEMP_DIR)
                 .put("dir_path", "").put("dir_init_lock", false)
         )
         val fid = j.optJSONObject("data")?.optString("fid")?.takeIf { it.isNotBlank() }
-        com.fanxing.xbox.store.AppLog.i("Quark", "临时目录 fid=${fid ?: "null"}")
-        return fid ?: throw DriveError("夸克：创建转存目录失败 ${j.optString("message")}")
+        if (fid != null) {
+            com.fanxing.xbox.store.AppLog.i("Quark", "临时目录已建 fid=$fid")
+            return fid
+        }
+        // 23008「同名冲突」= 上次已经建过了，直接复用，不是错误
+        val msg = j.optString("message")
+        if (j.optInt("code") == 23008 || msg.contains("同名") || msg.contains("doloading")) {
+            val exist = findOwnFolder(TEMP_DIR)
+            if (!exist.isNullOrBlank()) {
+                com.fanxing.xbox.store.AppLog.i("Quark", "临时目录已存在，复用 fid=$exist")
+                return exist
+            }
+            com.fanxing.xbox.store.AppLog.w("Quark", "同名冲突但根目录没找到 $TEMP_DIR")
+        }
+        throw DriveError("夸克：创建转存目录失败 ${j.optString("message")}")
     }
 
     private fun pollTask(taskId: String): String {

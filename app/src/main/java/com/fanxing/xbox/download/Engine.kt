@@ -32,13 +32,13 @@ class Chunk(val index: Int, val start: Long, val end: Long, @Volatile var done: 
 
 class Task(
     val id: String,
-    val name: String,
+    var name: String,
     val sources: List<String>,
     val headers: Map<String, String>,
-    val savePath: String,
+    var savePath: String,
     /** 非空表示落盘到 MediaStore（系统 Download），savePath 此时仅作展示 */
-    val uri: String? = null,
-    val displayPath: String = savePath,
+    var uri: String? = null,
+    var displayPath: String = savePath,
     var size: Long = 0,
     var state: State = State.QUEUED,
     var error: String = "",
@@ -244,8 +244,8 @@ object Engine {
         if (!loadMeta(t)) buildChunks(t, connectionsFor(t))
         normalizeChunks(t)
 
-        // 3) 预分配文件；整个任务共用一个写入句柄，避免 512 分片各开一个 fd 撑爆 FD 上限
-        val sink = Sink(t)
+        // 3) 预分配文件；整个任务共用一个写入句柄，避免高并发分片各开一个 fd 撑爆 FD 上限
+        val sink = openOrRecreate(t)
         sink.preallocate(t.size)
 
         // 4) 进度心跳
@@ -305,6 +305,28 @@ object Engine {
             runCatching { sink.close() }
             persist(t)
             notifyUi()
+        }
+    }
+
+    /**
+     * 打开写入句柄；MediaStore 条目已失效时重建。
+     * 旧任务恢复后常报 FileNotFoundException: No item at content://media/...
+     * （pending 条目被系统清理或用户删了文件）。旧进度对新文件无意义，必须归零。
+     */
+    private fun openOrRecreate(t: Task): Sink {
+        try {
+            return Sink(t)
+        } catch (e: java.io.FileNotFoundException) {
+            com.fanxing.xbox.store.AppLog.w("DL", "落盘目标失效，重建：${e.message}")
+            val target = com.fanxing.xbox.store.Storage.create(appCtx, t.name)
+            t.uri = target.uri?.toString()
+            t.savePath = target.file?.absolutePath ?: target.displayPath
+            t.displayPath = target.displayPath
+            t.name = target.displayName
+            t.chunks.forEach { it.done = 0 }
+            persist(t)
+            com.fanxing.xbox.store.AppLog.i("DL", "已重建目标 ${t.displayPath}，进度归零重下")
+            return Sink(t)
         }
     }
 

@@ -21,6 +21,7 @@ class UcDrive : Drive {
     override val desc = "免登录解析下载。游客通道有大小限制，超限可用「转存后下载」"
 
     private val api = "https://pc-api.uc.cn"
+    private val TEMP_DIR = "starbox临时转存"
 
     private val guestUa =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -276,15 +277,58 @@ class UcDrive : Drive {
         }
     }
 
+
+    /** 登录态 GET（查个人盘目录用） */
+    private fun authGet(url: String): JSONObject {
+        val ck = loginCookie
+        if (ck.isBlank()) throw DriveError("UC：需要先登录")
+        val b = Request.Builder().url(url).get()
+            .header("Cookie", ck)
+            .header("User-Agent", cloudUa)
+            .header("Referer", "https://drive.uc.cn/")
+        Http.api.newCall(b.build()).execute().use { r ->
+            val txt = r.body?.string() ?: throw DriveError("UC：空响应")
+            return runCatching { JSONObject(txt) }.getOrElse {
+                throw DriveError("UC：响应非 JSON（HTTP ${r.code}）")
+            }
+        }
+    }
+
+    /** 根目录下按名字找已存在的文件夹 */
+    private fun findOwnFolder(name: String): String? = runCatching {
+        val j = authGet(
+            "$api/1/clouddrive/file/sort?pr=UCBrowser&fr=pc&pdir_fid=0" +
+                "&_page=1&_size=200&_sort=file_type:asc,file_name:asc"
+        )
+        val arr = j.optJSONObject("data")?.optJSONArray("list") ?: JSONArray()
+        for (i in 0 until arr.length()) {
+            val it = arr.getJSONObject(i)
+            val isDir = it.optBoolean("dir", false) || !it.optBoolean("file", true)
+            if (isDir && it.optString("file_name") == name) return@runCatching it.optString("fid")
+        }
+        null
+    }.getOrNull()
+
     private fun tempDir(): String {
         val j = authPost(
             "$api/1/clouddrive/file?pr=UCBrowser&fr=pc",
-            JSONObject().put("pdir_fid", "0").put("file_name", "starbox临时转存")
+            JSONObject().put("pdir_fid", "0").put("file_name", TEMP_DIR)
                 .put("dir_path", "").put("dir_init_lock", false)
         )
         val fid = j.optJSONObject("data")?.optString("fid") ?: ""
-        if (fid.isBlank()) throw DriveError("UC：创建转存目录失败 ${j.optString("message")}")
-        return fid
+        if (fid.isNotBlank()) {
+            com.fanxing.xbox.store.AppLog.i("UC", "临时目录已建 fid=$fid")
+            return fid
+        }
+        val msg = j.optString("message")
+        if (j.optInt("code") == 23008 || msg.contains("同名") || msg.contains("doloading")) {
+            val exist = findOwnFolder(TEMP_DIR)
+            if (!exist.isNullOrBlank()) {
+                com.fanxing.xbox.store.AppLog.i("UC", "临时目录已存在，复用 fid=$exist")
+                return exist
+            }
+        }
+        throw DriveError("UC：创建转存目录失败 ${j.optString("message")}")
     }
 
     private fun pollTask(taskId: String): String {
