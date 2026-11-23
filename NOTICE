@@ -1,0 +1,50 @@
+starbox — 安卓网盘下载器
+Copyright (C) 2026 fanxing
+
+本程序是自由软件：您可以依据自由软件基金会发布的 GNU Affero 通用公共许可证
+（第 3 版或更高版本）重新分发和/或修改它。完整条款见 LICENSE。
+
+本程序按「现状」提供，不附带任何担保。详见 LICENSE 与免责声明。
+
+────────────────────────────────────────
+第三方代码归属（AGPL-3.0）
+────────────────────────────────────────
+
+本应用的网盘解析驱动移植自以下开源项目，均为 AGPL-3.0 授权。
+作为衍生作品，本应用整体同样以 AGPL-3.0 授权。
+
+1. YunX-Desktop / 云析（Kotlin）
+   https://github.com/tidain/YunX-Desktop
+   移植内容：UC、夸克、百度、迅雷（captcha 签名与盐）、123 云盘、
+             蓝奏云、115、光鸭、移动云盘 139 的接口实现
+
+2. wenxi / 文析助手（Dart / Flutter）
+   https://github.com/z7786/wenxi
+   移植内容：腾讯微云协议、天翼云盘分享流程、PikPak 验证码与分享流程
+
+3. LinkSwift / 网盘直链下载助手（JavaScript）
+   https://github.com/hmjz100/LinkSwift
+   移植内容：百度网盘 User-Agent 规则、迅雷 CDN 镜像节点表
+
+感谢以上项目作者的工作。本应用仅移植其公开的接口实现代码，
+未使用任何二进制文件、专有代码或绕过付费/限速的机制。
+
+────────────────────────────────────────
+运行库（Apache License 2.0）
+────────────────────────────────────────
+Kotlin / kotlinx.coroutines — JetBrains
+AndroidX 各组件 — The Android Open Source Project
+Material Components for Android — Google
+OkHttp / Okio — Square, Inc.
+AndroidX Media3 / ExoPlayer — The Android Open Source Project
+Guava / errorprone annotations — Google
+
+────────────────────────────────────────
+其他
+────────────────────────────────────────
+应用图标由用户提供，版权归用户所有，不适用本项目的 AGPL 授权。
+PDF 预览使用 Android 系统 API（android.graphics.pdf.PdfRenderer），无第三方依赖。
+下载引擎为本项目原创实现。
+
+本应用不是任何网盘服务商的官方客户端，与相关公司无隶属或授权关系。
+各网盘名称与商标归其各自所有者。

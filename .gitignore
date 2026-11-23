@@ -1,0 +1,17 @@
+# 签名凭据：绝不入库
+keystore.properties
+keystore/
+*.jks
+*.keystore
+
+# 构建产物
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.DS_Store
