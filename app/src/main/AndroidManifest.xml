@@ -45,6 +45,7 @@
             android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity android:name=".ui.PdfActivity" android:exported="false" />
         <activity android:name=".ui.LegalActivity" android:exported="false" />
+        <activity android:name=".ui.PermsActivity" android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

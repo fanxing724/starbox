@@ -52,6 +52,11 @@ class SettingsFragment : Fragment() {
         switchRow("后台保活", "前台服务 + 通知栏，防止被系统杀", creds.keepAlive) {
             creds.keepAlive = it
         }
+        val (pOk, pTotal) = Perms.readyCount(requireContext())
+        row("权限管理", "通知 / 电池优化 / 自启动，被拒后可跳系统设置开启",
+            "$pOk/$pTotal 就绪") {
+            startActivity(Intent(requireContext(), PermsActivity::class.java))
+        }
 
         section("外观")
         row("主题颜色", "固定浅色底 · 8 种强调色可选", Palette.nameOf(creds.colorTheme)) {
@@ -72,7 +77,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.14 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.15 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {
