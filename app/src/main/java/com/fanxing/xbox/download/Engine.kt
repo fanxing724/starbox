@@ -14,6 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -125,7 +126,15 @@ object Engine {
     private fun metaFile(t: Task): File =
         File(appCtx.filesDir, "meta/${t.id}.json")
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // 分片用的是阻塞式 execute()，Dispatchers.IO 默认只有 64 线程，
+    // 开 256 分片时会有 192 个协程卡在等线程，实际并发被锁在 64。
+    // 改用专用弹性线程池，让并发真正等于设定值。
+    private val dlExecutor = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r, "xbox-dl").apply { isDaemon = true }
+    }
+    private val scope = CoroutineScope(
+        SupervisorJob() + dlExecutor.asCoroutineDispatcher()
+    )
     private val main = Handler(Looper.getMainLooper())
     val tasks = CopyOnWriteArrayList<Task>()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
@@ -238,11 +247,16 @@ object Engine {
         com.fanxing.xbox.store.AppLog.i("DL", "开始 ${t.name} 源数=${t.sources.size} 预设大小=${t.size}")
         if (t.size <= 0) t.size = probeSize(t)
         if (t.size <= 0) throw DriveErr("无法获取文件大小（服务器未返回 Content-Range）")
-        com.fanxing.xbox.store.AppLog.i("DL", "探测大小=${t.size} 分片数=${t.chunks.size}")
 
         // 2) 载入/建立分片
-        if (!loadMeta(t)) buildChunks(t, connectionsFor(t))
+        val fromMeta = loadMeta(t)
+        if (!fromMeta) buildChunks(t, connectionsFor(t))
         normalizeChunks(t)
+        com.fanxing.xbox.store.AppLog.i(
+            "DL", "大小=${t.size} 分片数=${t.chunks.size} 来源=${if (fromMeta) "断点恢复" else "新建"} " +
+                "已完成=${t.chunks.count { it.finished }} 待下=${t.chunks.count { !it.finished }}"
+        )
+        if (t.chunks.isEmpty()) throw DriveErr("分片为空，无法下载")
 
         // 3) 预分配文件；整个任务共用一个写入句柄，避免高并发分片各开一个 fd 撑爆 FD 上限
         val sink = openOrRecreate(t)
@@ -251,11 +265,19 @@ object Engine {
         // 4) 进度心跳
         val tick = scope.launch {
             var last = t.downloaded
+            var beats = 0
             while (isActive && !t.cancelFlag.get()) {
                 delay(1000)
                 val now = t.downloaded
                 t.speed = now - last
                 last = now
+                // 每 5 秒记一条进度，方便从日志判断是真在下还是卡住
+                if (++beats % 5 == 0) {
+                    com.fanxing.xbox.store.AppLog.i(
+                        "DL", "进度 ${t.percent}% ${now}/${t.size} 速度=${t.speed}B/s " +
+                            "完成片=${t.chunks.count { it.finished }}/${t.chunks.size}"
+                    )
+                }
                 persist(t)
                 notifyUi()
             }
@@ -266,7 +288,9 @@ object Engine {
             val jobs = t.chunks.filter { !it.finished }.map { c ->
                 scope.launch { fetchChunk(t, c, sink) }
             }
+            com.fanxing.xbox.store.AppLog.i("DL", "已派发 ${jobs.size} 个分片协程")
             jobs.forEach { it.join() }
+            com.fanxing.xbox.store.AppLog.i("DL", "分片协程全部返回 完成=${t.chunks.count { it.finished }}/${t.chunks.size}")
 
             if (t.cancelFlag.get()) {
                 t.state = State.PAUSED
@@ -391,6 +415,11 @@ object Engine {
                         // 206 要完整校验区间：起点、终点、总大小
                         ChunkMath.checkRange(r.header("Content-Range"), from, c.end, t.size)
                             ?.let { throw DriveErr("分片 ${c.index} $it") }
+                    }
+                    if (attempt == 0 && c.done == 0L) {
+                        com.fanxing.xbox.store.AppLog.d(
+                            "DL", "片${c.index} HTTP ${r.code} CR=${r.header("Content-Range") ?: "无"} CL=${r.header("Content-Length") ?: "无"}"
+                        )
                     }
                     val body = r.body ?: throw DriveErr("分片 ${c.index} 空响应")
                     run {
