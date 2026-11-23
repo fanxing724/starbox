@@ -45,7 +45,7 @@ class TasksAdapter : RecyclerView.Adapter<TasksAdapter.VH>() {
         }
         h.b.btnDelete.setOnClickListener { Engine.remove(t.id); notifyDataSetChanged() }
         h.b.root.setOnClickListener {
-            if (t.state == State.DONE) OpenFile.open(h.b.root.context, t.savePath)
+            if (t.state == State.DONE) OpenFile.open(h.b.root.context, t.savePath, t.uri)
         }
     }
 }

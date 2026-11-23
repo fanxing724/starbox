@@ -12,7 +12,35 @@ object OpenFile {
     private val VIDEO = setOf("mp4", "mkv", "webm", "mov", "avi", "flv", "ts", "m3u8", "m4v", "3gp")
     private val AUDIO = setOf("mp3", "flac", "wav", "aac", "ogg", "m4a")
 
-    fun open(ctx: Context, path: String) {
+    fun open(ctx: Context, path: String, uriStr: String? = null) {
+        // MediaStore 落盘：直接用 content Uri
+        if (!uriStr.isNullOrBlank()) {
+            val uri = android.net.Uri.parse(uriStr)
+            val name = path.substringAfterLast('/')
+            val ext = name.substringAfterLast('.', "").lowercase()
+            if (ext in VIDEO || ext in AUDIO) {
+                ctx.startActivity(
+                    Intent(ctx, PlayerActivity::class.java).putExtra("url", uriStr)
+                )
+                return
+            }
+            if (ext == "pdf") {
+                ctx.startActivity(
+                    Intent(ctx, PdfActivity::class.java).putExtra("uri", uriStr)
+                )
+                return
+            }
+            runCatching {
+                val mime = ctx.contentResolver.getType(uri) ?: mimeOf(ext)
+                val i = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(Intent.createChooser(i, "打开方式").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.onFailure { toast(ctx, "没有可打开该文件的应用") }
+            return
+        }
+
         val f = File(path)
         if (!f.exists()) { toast(ctx, "文件不存在"); return }
         val ext = f.extension.lowercase()
@@ -44,6 +72,18 @@ object OpenFile {
             }
             ctx.startActivity(Intent.createChooser(i, "打开方式").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }.onFailure { toast(ctx, "没有可打开该文件的应用：${it.message}") }
+    }
+
+    private fun mimeOf(ext: String): String = when (ext) {
+        "apk" -> "application/vnd.android.package-archive"
+        "pdf" -> "application/pdf"
+        "jpg", "jpeg", "png", "webp", "gif" -> "image/*"
+        "zip", "rar", "7z" -> "application/zip"
+        "txt", "md", "log" -> "text/plain"
+        "mp4", "m4v" -> "video/mp4"
+        "mkv" -> "video/x-matroska"
+        "mp3" -> "audio/mpeg"
+        else -> "*/*"
     }
 
     private fun toast(ctx: Context, s: String) =

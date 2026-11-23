@@ -28,11 +28,16 @@ class PdfActivity : AppCompatActivity() {
         setContentView(b.root)
 
         val path = intent.getStringExtra("path") ?: ""
-        val f = File(path)
-        if (!f.exists()) { toast("文件不存在"); finish(); return }
-
+        val uriStr = intent.getStringExtra("uri")
         try {
-            fd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+            fd = if (!uriStr.isNullOrBlank()) {
+                contentResolver.openFileDescriptor(android.net.Uri.parse(uriStr), "r")
+            } else {
+                val f = File(path)
+                if (!f.exists()) { toast("文件不存在"); finish(); return }
+                ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+            }
+            if (fd == null) { toast("无法打开文件"); finish(); return }
             renderer = PdfRenderer(fd!!)
         } catch (e: Exception) {
             toast("打开 PDF 失败：${e.message}"); finish(); return

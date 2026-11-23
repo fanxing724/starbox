@@ -7,11 +7,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -29,10 +29,10 @@ import com.fanxing.xbox.drive.expandMirrors
 import com.fanxing.xbox.store.Creds
 import com.fanxing.xbox.store.CredsHolder
 import com.fanxing.xbox.store.History
+import com.fanxing.xbox.store.Storage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.util.UUID
 
 class ParseFragment : Fragment() {
@@ -48,6 +48,9 @@ class ParseFragment : Fragment() {
     private var files: List<RemoteFile> = emptyList()
     private var statusText = "粘贴链接后点解析"
 
+    /** 目录栈：空=分享根目录 */
+    private val dirStack = ArrayList<RemoteFile>()
+
     override fun onCreateView(i: LayoutInflater, c: ViewGroup?, s: Bundle?): View {
         _b = FragmentParseBinding.inflate(i, c, false)
         return b.root
@@ -60,16 +63,30 @@ class ParseFragment : Fragment() {
         b.fileList.adapter = adapter
         adapter.submit(files)
         b.status.text = statusText
-        updateEmpty()
-        updateDownloadButton()
+        updateEmpty(); updateDownloadButton(); updateNav()
 
         b.btnParse.setOnClickListener { parse() }
         b.btnPaste.setOnClickListener { pasteFromClipboard() }
         b.btnHistory.setOnClickListener { showHistory() }
         b.btnDownload.setOnClickListener { downloadSelected() }
         b.btnTransfer.setOnClickListener { transferThenDownload() }
+        b.btnUp.setOnClickListener { goUp() }
 
-        askNotificationPermission()
+        // 系统返回键：在子目录里先回上层，而不是直接退出
+        requireActivity().onBackPressedDispatcher.addCallback(
+            viewLifecycleOwner,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (dirStack.isNotEmpty()) goUp()
+                    else {
+                        isEnabled = false
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        )
+
+        askPermissions()
         consumePending()
     }
 
@@ -98,6 +115,11 @@ class ParseFragment : Fragment() {
         _b?.empty?.visibility = if (adapter.items.isEmpty()) View.VISIBLE else View.GONE
     }
 
+    private fun updateNav() {
+        _b?.navRow?.visibility = if (dirStack.isEmpty()) View.GONE else View.VISIBLE
+        _b?.crumb?.text = "根目录 / " + dirStack.joinToString(" / ") { it.name }
+    }
+
     private fun updateDownloadButton() {
         val n = adapter.selected.size
         _b?.btnDownload?.apply {
@@ -107,6 +129,108 @@ class ParseFragment : Fragment() {
         _b?.btnTransfer?.apply {
             visibility = if (drive?.supportsTransfer == true) View.VISIBLE else View.GONE
             isEnabled = n > 0
+        }
+    }
+
+    private fun parse() {
+        val url = b.inputLink.text?.toString()?.trim().orEmpty()
+        if (url.isBlank()) { toast("先粘贴一个分享链接"); return }
+        val d = Registry.detect(url)
+        if (d == null) { setStatus("无法识别该链接。支持：${Registry.names}"); return }
+        drive = d
+        dirStack.clear()
+        setStatus("识别为 ${d.name}，正在解析…")
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val sh = withContext(Dispatchers.IO) { d.parse(url) }
+                share = sh
+                val list = withContext(Dispatchers.IO) { d.list(sh, null) }
+                files = list
+                adapter.submit(list)
+                updateEmpty(); updateDownloadButton(); updateNav()
+                History.get(requireContext()).add(url, d.name, list.firstOrNull()?.name ?: d.name)
+                val needLogin = d.loginUrl != null && !Creds.get(requireContext()).has(d.id)
+                setStatus("${d.name} · ${list.size} 项" + if (needLogin) " · 该盘需登录（去设置）" else "")
+            } catch (e: Exception) {
+                setStatus("解析失败：${e.message}")
+            }
+        }
+    }
+
+    private fun openDir(dir: RemoteFile) {
+        dirStack.add(dir)
+        loadDir(dir)
+    }
+
+    private fun goUp() {
+        if (dirStack.isEmpty()) return
+        dirStack.removeAt(dirStack.size - 1)
+        loadDir(dirStack.lastOrNull())
+    }
+
+    private fun loadDir(dir: RemoteFile?) {
+        val d = drive ?: return
+        val sh = share ?: return
+        setStatus(if (dir == null) "返回根目录…" else "进入 ${dir.name} …")
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val list = withContext(Dispatchers.IO) { d.list(sh, dir) }
+                val prefix = dirStack.joinToString("/") { it.name }
+                list.forEach { it.path = if (prefix.isBlank()) it.name else "$prefix/${it.name}" }
+                files = list
+                adapter.submit(list)
+                updateEmpty(); updateDownloadButton(); updateNav()
+                setStatus("${d.name} · ${dir?.name ?: "根目录"} · ${list.size} 项")
+            } catch (e: Exception) {
+                setStatus("打开目录失败：${e.message}")
+            }
+        }
+    }
+
+    private fun downloadSelected() {
+        val d = drive ?: return
+        val sh = share ?: return
+        val picked = adapter.selectedFiles()
+        if (picked.isEmpty()) { toast("先勾选要下的文件"); return }
+        enqueue(d, sh, picked)
+    }
+
+    private fun enqueue(d: Drive, sh: ShareRef, picked: List<RemoteFile>) {
+        setStatus("正在取直链…")
+        viewLifecycleOwner.lifecycleScope.launch {
+            var ok = 0
+            for (f in picked) {
+                try {
+                    val link = withContext(Dispatchers.IO) { d.link(sh, f) }
+                    val sources =
+                        if (CredsHolder.useMirror) expandMirrors(link.url, link.mirrors)
+                        else listOf(link.url)
+                    // 落盘到系统公共 Download 目录
+                    val target = withContext(Dispatchers.IO) {
+                        Storage.create(requireContext(), f.name.ifBlank { "file_${f.id}" })
+                    }
+                    Engine.submit(
+                        Task(
+                            id = UUID.randomUUID().toString(),
+                            name = target.displayName,
+                            sources = sources,
+                            headers = link.headers,
+                            savePath = target.file?.absolutePath ?: target.displayPath,
+                            uri = target.uri?.toString(),
+                            displayPath = target.displayPath,
+                            size = f.size
+                        )
+                    )
+                    ok++
+                } catch (e: Exception) {
+                    setStatus("「${f.name}」失败：${e.message}")
+                }
+            }
+            if (ok > 0) {
+                if (Creds.get(requireContext()).keepAlive) DownloadService.start(requireContext())
+                setStatus("已加入 $ok 个任务 · 保存到 ${Storage.publicDirLabel()}")
+                (activity as? MainActivity)?.goTasks()
+            }
         }
     }
 
@@ -143,93 +267,6 @@ class ParseFragment : Fragment() {
             .show()
     }
 
-    private fun parse() {
-        val url = b.inputLink.text?.toString()?.trim().orEmpty()
-        if (url.isBlank()) { toast("先粘贴一个分享链接"); return }
-        val d = Registry.detect(url)
-        if (d == null) { setStatus("无法识别该链接。支持：${Registry.names}"); return }
-        drive = d
-        setStatus("识别为 ${d.name}，正在解析…")
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val sh = withContext(Dispatchers.IO) { d.parse(url) }
-                share = sh
-                val list = withContext(Dispatchers.IO) { d.list(sh, null) }
-                files = list
-                adapter.submit(list)
-                updateEmpty(); updateDownloadButton()
-                History.get(requireContext()).add(url, d.name, list.firstOrNull()?.name ?: d.name)
-                val needLogin = d.loginUrl != null && !Creds.get(requireContext()).has(d.id)
-                setStatus("${d.name} · ${list.size} 项" + if (needLogin) " · 该盘需登录（去设置）" else "")
-            } catch (e: Exception) {
-                setStatus("解析失败：${e.message}")
-            }
-        }
-    }
-
-    private fun openDir(dir: RemoteFile) {
-        val d = drive ?: return
-        val sh = share ?: return
-        setStatus("进入 ${dir.name} …")
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val list = withContext(Dispatchers.IO) { d.list(sh, dir) }
-                list.forEach { it.path = if (dir.path.isBlank()) it.name else "${dir.path}/${it.name}" }
-                files = list
-                adapter.submit(list)
-                updateEmpty(); updateDownloadButton()
-                setStatus("${d.name} · ${dir.name} · ${list.size} 项")
-            } catch (e: Exception) {
-                setStatus("打开目录失败：${e.message}")
-            }
-        }
-    }
-
-    private fun downloadSelected() {
-        val d = drive ?: return
-        val sh = share ?: return
-        val picked = adapter.selectedFiles()
-        if (picked.isEmpty()) { toast("先勾选要下的文件"); return }
-        enqueue(d, sh, picked)
-    }
-
-    private fun enqueue(d: Drive, sh: ShareRef, picked: List<RemoteFile>) {
-        val baseDir = requireContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: File(requireContext().filesDir, "Download")
-        baseDir.mkdirs()
-
-        setStatus("正在取直链…")
-        viewLifecycleOwner.lifecycleScope.launch {
-            var ok = 0
-            for (f in picked) {
-                try {
-                    val link = withContext(Dispatchers.IO) { d.link(sh, f) }
-                    val sources =
-                        if (CredsHolder.useMirror) expandMirrors(link.url, link.mirrors)
-                        else listOf(link.url)
-                    Engine.submit(
-                        Task(
-                            id = UUID.randomUUID().toString(),
-                            name = f.name,
-                            sources = sources,
-                            headers = link.headers,
-                            savePath = File(baseDir, f.name.ifBlank { "file_${f.id}" }).absolutePath,
-                            size = f.size
-                        )
-                    )
-                    ok++
-                } catch (e: Exception) {
-                    setStatus("「${f.name}」取直链失败：${e.message}")
-                }
-            }
-            if (ok > 0) {
-                if (Creds.get(requireContext()).keepAlive) DownloadService.start(requireContext())
-                setStatus("已加入 $ok 个任务 · ${CredsHolder.connections} 连接")
-                (activity as? MainActivity)?.goTasks()
-            }
-        }
-    }
-
     private fun showHistory() {
         val h = History.get(requireContext())
         val items = h.all()
@@ -244,13 +281,18 @@ class ParseFragment : Fragment() {
             .show()
     }
 
-    private fun askNotificationPermission() {
+    private fun askPermissions() {
+        val want = ArrayList<String>()
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100)
-        }
+        ) want.add(Manifest.permission.POST_NOTIFICATIONS)
+        // Android 9 及以下写公共 Download 需要存储权限；10+ 走 MediaStore 不需要
+        if (Build.VERSION.SDK_INT <= 28 &&
+            ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            != PackageManager.PERMISSION_GRANTED
+        ) want.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        if (want.isNotEmpty()) requestPermissions(want.toTypedArray(), 100)
     }
 
     override fun onDestroyView() {

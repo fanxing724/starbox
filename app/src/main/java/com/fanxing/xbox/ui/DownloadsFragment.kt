@@ -34,8 +34,7 @@ class DownloadsFragment : Fragment() {
         adapter = TasksAdapter()
         b.taskList.layoutManager = LinearLayoutManager(requireContext())
         b.taskList.adapter = adapter
-        b.savePath.text = "保存位置：" +
-            (requireContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.absolutePath ?: "内部存储")
+        b.savePath.text = "保存位置：" + com.fanxing.xbox.store.Storage.publicDirLabel()
         b.empty.visibility = if (Engine.tasks.isEmpty()) View.VISIBLE else View.GONE
         Engine.addListener(listener)
     }

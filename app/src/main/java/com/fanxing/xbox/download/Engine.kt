@@ -1,5 +1,7 @@
 package com.fanxing.xbox.download
 
+import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import com.fanxing.xbox.drive.Http
@@ -34,6 +36,9 @@ class Task(
     val sources: List<String>,
     val headers: Map<String, String>,
     val savePath: String,
+    /** 非空表示落盘到 MediaStore（系统 Download），savePath 此时仅作展示 */
+    val uri: String? = null,
+    val displayPath: String = savePath,
     var size: Long = 0,
     var state: State = State.QUEUED,
     var error: String = "",
@@ -59,6 +64,51 @@ class Task(
  * 外部下载器去重用的；本引擎自己发请求，同一 URL 可以并发请求多次。
  */
 object Engine {
+
+    @Volatile private lateinit var appCtx: Context
+    fun init(ctx: Context) { appCtx = ctx.applicationContext }
+
+    /** 统一写入句柄。
+     *  MediaStore 走 ParcelFileDescriptor + Os.pwrite（按偏移定位写，天然并发安全）；
+     *  旧系统走 RandomAccessFile。每个分片各开一个，互不干扰。 */
+    private class Sink(t: Task) : AutoCloseable {
+        private val pfd: android.os.ParcelFileDescriptor? = t.uri?.let {
+            appCtx.contentResolver.openFileDescriptor(Uri.parse(it), "rw")
+        }
+        private val raf: RandomAccessFile? =
+            if (pfd == null) RandomAccessFile(File(t.savePath), "rw") else null
+
+        fun preallocate(size: Long) {
+            if (pfd != null) android.system.Os.ftruncate(pfd.fileDescriptor, size)
+            else raf!!.setLength(size)
+        }
+
+        fun writeAt(offset: Long, buf: ByteArray, len: Int) {
+            if (pfd != null) {
+                var done = 0
+                while (done < len) {
+                    val n = android.system.Os.pwrite(
+                        pfd.fileDescriptor,
+                        java.nio.ByteBuffer.wrap(buf, done, len - done),
+                        offset + done
+                    )
+                    if (n <= 0) throw DriveErr("写入失败")
+                    done += n
+                }
+            } else {
+                raf!!.seek(offset)
+                raf.write(buf, 0, len)
+            }
+        }
+
+        override fun close() {
+            runCatching { raf?.close() }
+            runCatching { pfd?.close() }
+        }
+    }
+
+    private fun metaFile(t: Task): File =
+        File(appCtx.filesDir, "meta/${t.id}.json")
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val main = Handler(Looper.getMainLooper())
@@ -101,8 +151,8 @@ object Engine {
     fun remove(id: String) {
         val t = find(id) ?: return
         t.cancelFlag.set(true)
-        runCatching { File(t.savePath).delete() }
-        runCatching { File(t.savePath + ".xmeta").delete() }
+        runCatching { com.fanxing.xbox.store.Storage.delete(appCtx, t.uri, t.savePath) }
+        runCatching { metaFile(t).delete() }
         tasks.remove(t)
         notifyUi()
     }
@@ -133,8 +183,8 @@ object Engine {
     // ---------------- 核心 ----------------
 
     private suspend fun run(t: Task) {
-        val out = File(t.savePath)
-        out.parentFile?.mkdirs()
+        if (t.uri == null) File(t.savePath).parentFile?.mkdirs()
+        metaFile(t).parentFile?.mkdirs()
 
         // 1) 探测真实大小：必须用 Range，UC 的 HEAD 返回的 Content-Length 是错的
         if (t.size <= 0) t.size = probeSize(t)
@@ -145,7 +195,7 @@ object Engine {
         normalizeChunks(t)
 
         // 3) 预分配文件
-        RandomAccessFile(out, "rw").use { it.setLength(t.size) }
+        Sink(t).use { it.preallocate(t.size) }
 
         // 4) 进度心跳
         val tick = scope.launch {
@@ -171,7 +221,13 @@ object Engine {
                 t.state = State.PAUSED
             } else if (t.chunks.all { it.finished }) {
                 t.state = State.DONE
-                File(t.savePath + ".xmeta").delete()
+                metaFile(t).delete()
+                com.fanxing.xbox.store.Storage.finish(
+                    appCtx,
+                    com.fanxing.xbox.store.Storage.Target(
+                        t.uri?.let { Uri.parse(it) }, null, t.name, t.displayPath
+                    )
+                )
             } else {
                 t.state = State.ERROR
                 t.error = "部分分片未完成"
@@ -244,14 +300,15 @@ object Engine {
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
                     }
                     val body = r.body ?: throw DriveErr("分片 ${c.index} 空响应")
-                    RandomAccessFile(File(t.savePath), "rw").use { raf ->
-                        raf.seek(from)
+                    Sink(t).use { sink ->
+                        var pos = from
                         val buf = ByteArray(64 * 1024)
                         val input = body.byteStream()
                         while (!t.cancelFlag.get()) {
                             val n = input.read(buf)
                             if (n <= 0) break
-                            raf.write(buf, 0, n)
+                            sink.writeAt(pos, buf, n)
+                            pos += n
                             c.done += n
                             if (c.finished) break
                         }
@@ -283,12 +340,12 @@ object Engine {
             }
             val o = JSONObject()
                 .put("size", t.size).put("name", t.name).put("chunks", arr)
-            File(t.savePath + ".xmeta").writeText(o.toString())
+            metaFile(t).writeText(o.toString())
         }
     }
 
     private fun loadMeta(t: Task): Boolean {
-        val f = File(t.savePath + ".xmeta")
+        val f = metaFile(t)
         if (!f.exists()) return false
         return runCatching {
             val o = JSONObject(f.readText())
