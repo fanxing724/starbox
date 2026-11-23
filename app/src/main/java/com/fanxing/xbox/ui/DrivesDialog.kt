@@ -59,15 +59,20 @@ object DrivesDialog {
         }
 
         fun row(d: Drive) {
+            // 两个独立概念，不能混：
+            // guestParse = 能否不登录就解析（决定分组与徽标）
+            // canLogin   = 是否提供登录（决定能不能点去登录）
+            // 夸克/迅雷/PikPak 等属于「可游客解析，但登录才能下大文件」，两者都为真
             val needLogin = !d.guestParse
+            val canLogin = d.loginUrl != null
             val logged = creds.has(d.id)
 
             val line = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(10), 0, dp(10))
-                isClickable = needLogin
-                if (needLogin) setOnClickListener {
+                isClickable = canLogin
+                if (canLogin) setOnClickListener {
                     ctx.startActivity(
                         Intent(ctx, LoginActivity::class.java).putExtra("drive", d.id)
                     )
@@ -113,7 +118,7 @@ object DrivesDialog {
             }
             line.addView(nameBox)
 
-            if (needLogin) {
+            if (canLogin) {
                 line.addView(TextView(ctx).apply {
                     text = if (logged) "已登录 ›" else "去登录 ›"
                     textSize = 12f
@@ -124,7 +129,7 @@ object DrivesDialog {
             box.addView(line)
         }
 
-        section("免登录解析 · 粘贴链接即可列文件")
+        section("免登录解析 · 标「去登录」的登录后功能更全")
         free.forEach { row(it) }
         section("需登录解析 · 点整行去登录")
         need.forEach { row(it) }

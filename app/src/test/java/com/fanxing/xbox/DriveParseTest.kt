@@ -103,6 +103,22 @@ class DriveParseTest {
     }
 
     @Test
+    fun guestParseAndLoginCapability_areIndependent() {
+        // 回归：曾用 !guestParse 同时控制徽标和「去登录」入口，
+        // 导致夸克这类「可游客解析但登录才能下大文件」的盘登录入口消失。
+        val both = Registry.all.filter { it.guestParse && it.loginUrl != null }.map { it.id }.toSet()
+        assertTrue("夸克必须同时可游客解析且可登录", both.contains("quark"))
+        assertTrue("迅雷必须同时可游客解析且可登录", both.contains("xunlei"))
+        assertTrue("PikPak 必须同时可游客解析且可登录", both.contains("pikpak"))
+
+        // 凡提供了登录页的盘，都必须能进登录流程
+        Registry.all.filter { it.loginUrl != null }.forEach {
+            assertNotNull("${it.id} 有登录页却拿不到驱动", Registry.byId(it.id))
+            assertTrue("${it.id} 登录页地址为空", !it.loginUrl.isNullOrBlank())
+        }
+    }
+
+    @Test
     fun transferCapableDrives() {
         val t = Registry.all.filter { it.supportsTransfer }.map { it.id }.toSet()
         assertEquals(setOf("uc", "quark"), t)
