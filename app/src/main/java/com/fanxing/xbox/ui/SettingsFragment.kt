@@ -36,7 +36,7 @@ class SettingsFragment : Fragment() {
         b.settingsList.removeAllViews()
 
         section("下载")
-        row("线程数（连接数）", "1–512，越多不一定越快", creds.connections.toString()) {
+        row("线程数（连接数）", "1–512 · 仅对新任务生效，已有任务沿用原分片", creds.connections.toString()) {
             askNumber("线程数（1–512）", creds.connections) { n ->
                 if (n in 1..512) { creds.connections = n; build() } else toast("需在 1-512 之间")
             }
@@ -72,7 +72,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.11 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.12 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {

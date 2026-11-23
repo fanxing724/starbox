@@ -2,5 +2,6 @@
 <paths>
     <external-files-path name="downloads" path="Download/" />
     <files-path name="internal" path="Download/" />
-    <external-path name="external" path="." />
+    <!-- 只授权公共 Download，不开放整个外部存储根 -->
+    <external-path name="public_downloads" path="Download/" />
 </paths>

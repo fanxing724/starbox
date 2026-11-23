@@ -70,6 +70,17 @@ class DriveError(message: String) : Exception(message)
  */
 fun expandMirrors(url: String, mirrors: List<String>, limit: Int = 8): List<String> {
     if (mirrors.isEmpty()) return listOf(url)
-    val host = runCatching { java.net.URI(url).host }.getOrNull() ?: return listOf(url)
-    return listOf(url) + mirrors.take(limit).map { url.replace(host, it) }
+    val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return listOf(url)
+    val host = uri.host
+    if (host.isNullOrBlank()) return listOf(url)
+    // 只重建 authority：String.replace 会连 path/query 里出现的同名串一起换掉，
+    // 而签名 URL 常把 host 回写进参数，一改签名就废。
+    return (listOf(url) + mirrors.take(limit).map { node ->
+        runCatching {
+            java.net.URI(
+                uri.scheme, uri.userInfo, node, uri.port,
+                uri.path, uri.query, uri.fragment
+            ).toString()
+        }.getOrDefault(url)
+    }).distinct()
 }

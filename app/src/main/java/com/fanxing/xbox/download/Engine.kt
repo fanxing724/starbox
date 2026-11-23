@@ -25,7 +25,7 @@ import kotlinx.coroutines.runBlocking
 
 enum class State { QUEUED, RUNNING, PAUSED, DONE, ERROR }
 
-class Chunk(val index: Int, val start: Long, val end: Long, var done: Long = 0) {
+class Chunk(val index: Int, val start: Long, val end: Long, @Volatile var done: Long = 0) {
     val length: Long get() = end - start + 1
     val finished: Boolean get() = done >= length
 }
@@ -85,6 +85,7 @@ object Engine {
 
         fun writeAt(offset: Long, buf: ByteArray, len: Int) {
             if (pfd != null) {
+                // pwrite 按偏移定位写，多分片共用一个 fd 也安全
                 var done = 0
                 while (done < len) {
                     val n = android.system.Os.pwrite(
@@ -96,8 +97,11 @@ object Engine {
                     done += n
                 }
             } else {
-                raf!!.seek(offset)
-                raf.write(buf, 0, len)
+                // RandomAccessFile 的 seek+write 不是原子的，共用时必须串行
+                synchronized(this) {
+                    raf!!.seek(offset)
+                    raf.write(buf, 0, len)
+                }
             }
         }
 
@@ -194,8 +198,9 @@ object Engine {
         if (!loadMeta(t)) buildChunks(t, connectionsFor(t))
         normalizeChunks(t)
 
-        // 3) 预分配文件
-        Sink(t).use { it.preallocate(t.size) }
+        // 3) 预分配文件；整个任务共用一个写入句柄，避免 512 分片各开一个 fd 撑爆 FD 上限
+        val sink = Sink(t)
+        sink.preallocate(t.size)
 
         // 4) 进度心跳
         val tick = scope.launch {
@@ -213,27 +218,35 @@ object Engine {
         try {
             // 5) 并发拉各分片
             val jobs = t.chunks.filter { !it.finished }.map { c ->
-                scope.launch { fetchChunk(t, c) }
+                scope.launch { fetchChunk(t, c, sink) }
             }
             jobs.forEach { it.join() }
 
             if (t.cancelFlag.get()) {
                 t.state = State.PAUSED
             } else if (t.chunks.all { it.finished }) {
-                t.state = State.DONE
-                metaFile(t).delete()
-                com.fanxing.xbox.store.Storage.finish(
-                    appCtx,
-                    com.fanxing.xbox.store.Storage.Target(
-                        t.uri?.let { Uri.parse(it) }, null, t.name, t.displayPath
+                // 完工校验：分片覆盖必须等于文件总长，否则宁可报错也不交付损坏文件
+                val covered = t.chunks.sumOf { it.length }
+                if (covered != t.size) {
+                    t.state = State.ERROR
+                    t.error = "分片覆盖 ${covered}B ≠ 文件 ${t.size}B，已中止以防损坏"
+                } else {
+                    t.state = State.DONE
+                    metaFile(t).delete()
+                    com.fanxing.xbox.store.Storage.finish(
+                        appCtx,
+                        com.fanxing.xbox.store.Storage.Target(
+                            t.uri?.let { Uri.parse(it) }, null, t.name, t.displayPath
+                        )
                     )
-                )
+                }
             } else {
                 t.state = State.ERROR
                 t.error = "部分分片未完成"
             }
         } finally {
             tick.cancelAndJoin()
+            runCatching { sink.close() }
             persist(t)
             notifyUi()
         }
@@ -285,7 +298,7 @@ object Engine {
         }
     }
 
-    private suspend fun fetchChunk(t: Task, c: Chunk) {
+    private suspend fun fetchChunk(t: Task, c: Chunk, sink: Sink) {
         var attempt = 0
         while (!c.finished && !t.cancelFlag.get() && attempt < 6) {
             try {
@@ -296,11 +309,25 @@ object Engine {
                     .get().build()
 
                 Http.dl.newCall(req).execute().use { r ->
-                    if (r.code != 206 && r.code != 200) {
+                    if (r.code == 200) {
+                        // 服务器忽略了 Range，回的是「整个文件」。
+                        // 多分片时每片都会把文件开头写到自己的偏移上 → 静默损坏，必须拒绝。
+                        if (from != 0L || t.chunks.size != 1) {
+                            throw DriveErr("服务器不支持 Range（HTTP 200），无法分片下载")
+                        }
+                    } else if (r.code != 206) {
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
+                    } else {
+                        // 206 也要校验起点，防止 CDN 返回错位区间
+                        val crStart = r.header("Content-Range")
+                            ?.substringAfter("bytes ", "")
+                            ?.substringBefore("-", "")?.trim()?.toLongOrNull()
+                        if (crStart != null && crStart != from) {
+                            throw DriveErr("分片 ${c.index} 起点错位：期望 $from 实得 $crStart")
+                        }
                     }
                     val body = r.body ?: throw DriveErr("分片 ${c.index} 空响应")
-                    Sink(t).use { sink ->
+                    run {
                         var pos = from
                         val buf = ByteArray(64 * 1024)
                         val input = body.byteStream()
@@ -336,7 +363,7 @@ object Engine {
         runCatching {
             val arr = JSONArray()
             t.chunks.forEach { c ->
-                arr.put(JSONObject().put("s", c.start).put("e", c.end).put("d", c.done))
+                arr.put(JSONObject().put("i", c.index).put("s", c.start).put("e", c.end).put("d", c.done))
             }
             val o = JSONObject()
                 .put("size", t.size).put("name", t.name).put("chunks", arr)
@@ -354,7 +381,7 @@ object Engine {
             t.chunks.clear()
             for (i in 0 until arr.length()) {
                 val c = arr.getJSONObject(i)
-                t.chunks.add(Chunk(i, c.getLong("s"), c.getLong("e"), c.optLong("d")))
+                t.chunks.add(Chunk(c.optInt("i", i), c.getLong("s"), c.getLong("e"), c.optLong("d")))
             }
             t.chunks.isNotEmpty()
         }.getOrDefault(false)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+：凭据不参与云备份与设备迁移 -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="xbox_creds.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="xbox_creds.xml" />
+    </device-transfer>
+</data-extraction-rules>

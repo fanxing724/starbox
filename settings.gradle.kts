@@ -19,5 +19,5 @@ dependencyResolutionManagement {
         maven { url = uri("https://maven.aliyun.com/repository/public") }
     }
 }
-rootProject.name = "xbox"
+rootProject.name = "starbox"
 include(":app")
