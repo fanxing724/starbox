@@ -149,8 +149,15 @@ class ParseFragment : Fragment() {
                 adapter.submit(list)
                 updateEmpty(); updateDownloadButton(); updateNav()
                 History.get(requireContext()).add(url, d.name, list.firstOrNull()?.name ?: d.name)
-                val needLogin = d.loginUrl != null && !Creds.get(requireContext()).has(d.id)
-                setStatus("${d.name} · ${list.size} 项" + if (needLogin) " · 该盘需登录（去设置）" else "")
+                val logged = Creds.get(requireContext()).has(d.id)
+                val hint = when {
+                    logged -> ""
+                    // 已经列出文件了，不能再说「需登录」；这类盘登录只是解锁大文件/下载
+                    d.guestParse && d.loginUrl != null -> " · 登录后可下大文件"
+                    d.loginUrl != null -> " · 该盘需登录（去设置）"
+                    else -> ""
+                }
+                setStatus("${d.name} · ${list.size} 项" + hint)
             } catch (e: Exception) {
                 setStatus("解析失败：${e.message}")
             }

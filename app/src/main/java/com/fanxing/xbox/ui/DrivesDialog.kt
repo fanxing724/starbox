@@ -35,9 +35,13 @@ object DrivesDialog {
             setPadding(dp(20), dp(12), dp(20), dp(8))
         }
 
-        val loggedIn = need.count { creds.has(it.id) }
+        // 登录数要按「可登录的盘」算（含夸克等可游客解析但支持登录的），
+        // 否则与设置页入口和行内「已登录」状态口径不一致
+        val loginCapable = all.filter { it.loginUrl != null }
+        val loggedIn = loginCapable.count { creds.has(it.id) }
         box.addView(TextView(ctx).apply {
-            text = "共 ${all.size} 家 · ${free.size} 家免登录 · ${need.size} 家需登录（已登录 $loggedIn）"
+            text = "共 ${all.size} 家 · ${free.size} 家免登录解析 · ${need.size} 家需登录解析\n" +
+                "已登录 $loggedIn/${loginCapable.size} 家"
             textSize = 12f
             setTextColor(color(R.color.text_sub))
             setPadding(0, 0, 0, dp(10))
