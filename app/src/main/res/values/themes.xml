@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Xbox" parent="Theme.Material3.DayNight.NoActionBar">
+    <!-- 固定浅色底，强调色由下面的 Color.* 覆盖层决定 -->
+    <style name="Theme.Xbox" parent="Theme.Material3.Light.NoActionBar">
         <item name="colorPrimary">@color/brand</item>
         <item name="colorOnPrimary">@color/on_brand</item>
         <item name="colorPrimaryContainer">@color/brand_container</item>
@@ -12,7 +13,57 @@
         <item name="colorOutlineVariant">@color/divider</item>
         <item name="android:statusBarColor">@color/surface</item>
         <item name="android:navigationBarColor">@color/surface</item>
-        <item name="android:windowLightStatusBar">@bool/light_status_bar</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+
+    <!-- 配色覆盖层：只改强调色，其余不变 -->
+    <style name="Theme.Xbox.Color.Indigo" parent="">
+        <item name="colorPrimary">@color/c_indigo</item>
+        <item name="colorPrimaryContainer">@color/c_indigo_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_indigo_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Teal" parent="">
+        <item name="colorPrimary">@color/c_teal</item>
+        <item name="colorPrimaryContainer">@color/c_teal_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_teal_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Orange" parent="">
+        <item name="colorPrimary">@color/c_orange</item>
+        <item name="colorPrimaryContainer">@color/c_orange_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_orange_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Pink" parent="">
+        <item name="colorPrimary">@color/c_pink</item>
+        <item name="colorPrimaryContainer">@color/c_pink_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_pink_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Violet" parent="">
+        <item name="colorPrimary">@color/c_violet</item>
+        <item name="colorPrimaryContainer">@color/c_violet_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_violet_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Green" parent="">
+        <item name="colorPrimary">@color/c_green</item>
+        <item name="colorPrimaryContainer">@color/c_green_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_green_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Blue" parent="">
+        <item name="colorPrimary">@color/c_blue</item>
+        <item name="colorPrimaryContainer">@color/c_blue_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_blue_on</item>
+    </style>
+
+    <style name="Theme.Xbox.Color.Graphite" parent="">
+        <item name="colorPrimary">@color/c_graphite</item>
+        <item name="colorPrimaryContainer">@color/c_graphite_box</item>
+        <item name="colorOnPrimaryContainer">@color/c_graphite_on</item>
     </style>
 
     <style name="Xbox.Card" parent="Widget.Material3.CardView.Filled">

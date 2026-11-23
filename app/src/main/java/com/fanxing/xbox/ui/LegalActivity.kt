@@ -8,6 +8,7 @@ class LegalActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Palette.apply(this)
         val b = ActivityLegalBinding.inflate(layoutInflater)
         setContentView(b.root)
 

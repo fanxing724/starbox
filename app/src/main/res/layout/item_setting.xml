@@ -45,5 +45,5 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
         android:textSize="13sp"
-        android:textColor="@color/brand" />
+        android:textColor="?attr/colorPrimary" />
 </LinearLayout>

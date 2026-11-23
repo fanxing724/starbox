@@ -11,7 +11,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.fragment.app.Fragment
 import com.fanxing.xbox.databinding.FragmentSettingsBinding
 import com.fanxing.xbox.databinding.ItemSettingBinding
@@ -55,20 +54,8 @@ class SettingsFragment : Fragment() {
         }
 
         section("外观")
-        row("主题", "跟随系统 / 浅色 / 深色",
-            arrayOf("跟随系统", "浅色", "深色")[creds.themeMode]) {
-            AlertDialog.Builder(requireContext())
-                .setTitle("主题")
-                .setItems(arrayOf("跟随系统", "浅色", "深色")) { _, i ->
-                    creds.themeMode = i
-                    AppCompatDelegate.setDefaultNightMode(
-                        when (i) {
-                            1 -> AppCompatDelegate.MODE_NIGHT_NO
-                            2 -> AppCompatDelegate.MODE_NIGHT_YES
-                            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-                        }
-                    )
-                }.show()
+        row("主题颜色", "固定浅色底 · 8 种强调色可选", Palette.nameOf(creds.colorTheme)) {
+            pickColor()
         }
 
         section("网盘登录")
@@ -90,7 +77,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.2 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.3 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {
@@ -101,7 +88,11 @@ class SettingsFragment : Fragment() {
         val tv = TextView(requireContext()).apply {
             text = title
             textSize = 12f
-            setTextColor(resources.getColor(com.fanxing.xbox.R.color.brand, null))
+            setTextColor(
+                com.google.android.material.color.MaterialColors.getColor(
+                    this, com.google.android.material.R.attr.colorPrimary
+                )
+            )
             setPadding(dp(6), dp(16), dp(6), dp(6))
         }
         b.settingsList.addView(tv)
@@ -159,6 +150,59 @@ class SettingsFragment : Fragment() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 配色选择：带色块的列表，选中后重建界面生效 */
+    private fun pickColor() {
+        val creds = Creds.get(requireContext())
+        val box = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(4))
+        }
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("主题颜色")
+            .setView(box)
+            .setNegativeButton("取消", null)
+            .create()
+
+        Palette.names.forEachIndexed { i, name ->
+            val row = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(dp(8), dp(12), dp(8), dp(12))
+                setBackgroundResource(
+                    android.util.TypedValue().let {
+                        requireContext().theme.resolveAttribute(
+                            androidx.appcompat.R.attr.selectableItemBackground, it, true
+                        )
+                        it.resourceId
+                    }
+                )
+                setOnClickListener {
+                    creds.colorTheme = i
+                    dialog.dismiss()
+                    activity?.recreate()
+                }
+            }
+            val dot = View(requireContext()).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(resources.getColor(Palette.swatches[i], null))
+                }
+            }
+            val label = TextView(requireContext()).apply {
+                text = name + if (i == creds.colorTheme) "　✓ 当前" else ""
+                textSize = 15f
+                setTextColor(resources.getColor(com.fanxing.xbox.R.color.text_main, null))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { marginStart = dp(14) }
+            }
+            row.addView(dot); row.addView(label)
+            box.addView(row)
+        }
+        dialog.show()
     }
 
     private fun showSource() {

@@ -18,6 +18,7 @@ class LoginActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Palette.apply(this)
         b = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(b.root)
 

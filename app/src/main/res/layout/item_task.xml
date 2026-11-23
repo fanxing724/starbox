@@ -25,7 +25,7 @@
         android:layout_marginTop="8dp"
         app:trackCornerRadius="4dp"
         app:trackThickness="6dp"
-        app:indicatorColor="@color/brand"
+        app:indicatorColor="?attr/colorPrimary"
         app:trackColor="@color/divider"
         android:max="100"
         xmlns:app="http://schemas.android.com/apk/res-auto" />

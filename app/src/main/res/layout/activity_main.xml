@@ -14,7 +14,7 @@
         android:background="@color/surface"
         app:title="xbox"
         app:titleTextAppearance="@style/Xbox.Title"
-        app:titleTextColor="@color/brand" />
+        app:titleTextColor="?attr/colorPrimary" />
 
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/container"

@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="brand">#4F5DFF</color>
-    <color name="on_brand">#FFFFFF</color>
-    <color name="brand_container">#E4E7FF</color>
-    <color name="on_brand_container">#1B2378</color>
+    <!-- 基础界面色（固定浅色，不做明暗切换） -->
     <color name="bg">#F2F3F7</color>
     <color name="surface">#FFFFFF</color>
     <color name="surface_alt">#F6F7FB</color>
@@ -13,4 +10,43 @@
     <color name="ok">#12A150</color>
     <color name="warn">#E8A33D</color>
     <color name="err">#E5484D</color>
+
+    <!-- 默认强调色（靛蓝），兼容旧引用 -->
+    <color name="brand">#4F5DFF</color>
+    <color name="on_brand">#FFFFFF</color>
+    <color name="brand_container">#E4E7FF</color>
+    <color name="on_brand_container">#1B2378</color>
+
+    <!-- 可选配色 -->
+    <color name="c_indigo">#4F5DFF</color>
+    <color name="c_indigo_box">#E4E7FF</color>
+    <color name="c_indigo_on">#1B2378</color>
+
+    <color name="c_teal">#0E9F8E</color>
+    <color name="c_teal_box">#D6F5F0</color>
+    <color name="c_teal_on">#04463E</color>
+
+    <color name="c_orange">#F2762E</color>
+    <color name="c_orange_box">#FFE7D6</color>
+    <color name="c_orange_on">#7A3208</color>
+
+    <color name="c_pink">#E85D9E</color>
+    <color name="c_pink_box">#FFE0EE</color>
+    <color name="c_pink_on">#7A1244</color>
+
+    <color name="c_violet">#7C4DFF</color>
+    <color name="c_violet_box">#EBE1FF</color>
+    <color name="c_violet_on">#3A1A8C</color>
+
+    <color name="c_green">#2F9E44</color>
+    <color name="c_green_box">#DCF5E1</color>
+    <color name="c_green_on">#12491F</color>
+
+    <color name="c_blue">#1C7ED6</color>
+    <color name="c_blue_box">#D8EBFB</color>
+    <color name="c_blue_on">#0B3C68</color>
+
+    <color name="c_graphite">#4A5568</color>
+    <color name="c_graphite_box">#E2E6EC</color>
+    <color name="c_graphite_on">#1C2430</color>
 </resources>

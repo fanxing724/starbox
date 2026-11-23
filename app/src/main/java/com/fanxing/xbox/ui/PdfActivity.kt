@@ -23,6 +23,7 @@ class PdfActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Palette.apply(this)
         b = ActivityPdfBinding.inflate(layoutInflater)
         setContentView(b.root)
 

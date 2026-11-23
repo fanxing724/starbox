@@ -23,6 +23,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Palette.apply(this)
         b = ActivityPlayerBinding.inflate(layoutInflater)
         setContentView(b.root)
 

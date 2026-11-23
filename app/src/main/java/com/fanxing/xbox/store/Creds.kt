@@ -31,10 +31,10 @@ class Creds(ctx: Context) {
         get() = sp.getInt("parallel", 3)
         set(v) = sp.edit().putInt("parallel", v.coerceIn(1, 5)).apply()
 
-    /** 0=跟随系统 1=浅色 2=深色 */
-    var themeMode: Int
-        get() = sp.getInt("theme", 0)
-        set(v) = sp.edit().putInt("theme", v.coerceIn(0, 2)).apply()
+    /** 自定义配色索引（固定浅色底，只换强调色，不做明暗切换） */
+    var colorTheme: Int
+        get() = sp.getInt("color_theme", 0)
+        set(v) = sp.edit().putInt("color_theme", v.coerceIn(0, 7)).apply()
 
     var keepAlive: Boolean
         get() = sp.getBoolean("keep_alive", true)
