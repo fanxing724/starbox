@@ -17,6 +17,7 @@ class LanzouDrive : Drive {
     override val id = "lanzou"
     override val name = "蓝奏云"
     override val loginUrl: String? = null
+    override val desc = "免登录。单文件分享，需解 acw_sc__v2 人机校验"
 
     private val uaMobile =
         "Mozilla/5.0 (Linux; U; Android 4.0.4; es-mx; HTC_One_X Build/IMM76D) " +

@@ -24,6 +24,7 @@ class WeiyunDrive : Drive {
     override val id = "weiyun"
     override val name = "腾讯微云"
     override val loginUrl = "https://www.weiyun.com/"
+    override val desc = "需登录。官方不开放他人分享解析，仅可浏览自己的网盘"
     override val cookieDomain = "https://www.weiyun.com"
 
     private val web = "https://www.weiyun.com"

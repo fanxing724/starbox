@@ -20,6 +20,7 @@ class BaiduDrive : Drive {
     override val id = "baidu"
     override val name = "百度网盘"
     override val loginUrl = "https://pan.baidu.com/"
+    override val desc = "需登录。超过 50MB 的直链必须用 pan.baidu.com 作为 UA"
     override val cookieDomain = "https://pan.baidu.com"
 
     private val pan = "https://pan.baidu.com"

@@ -30,6 +30,7 @@ class Yidong139Drive : Drive {
     override val id = "yidong139"
     override val name = "移动云盘"
     override val loginUrl: String? = null
+    override val desc = "免登录。请求体 AES 加密，需 mcloud-sign 签名头"
 
     private val base = "https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink"
     private val aesKey = "PVGDwmcvfs1uV3d1".toByteArray(Charsets.UTF_8)

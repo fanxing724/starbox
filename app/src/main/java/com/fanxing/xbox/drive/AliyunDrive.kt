@@ -13,6 +13,7 @@ class AliyunDrive : Drive {
     override val id = "aliyun"
     override val name = "阿里云盘"
     override val loginUrl = "https://www.alipan.com/"
+    override val desc = "需登录。分享链接解析稳定"
     override val cookieDomain = "https://www.alipan.com"
 
     private val api = "https://api.alipan.com"

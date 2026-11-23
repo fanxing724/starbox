@@ -14,6 +14,7 @@ class Pan115Drive : Drive {
     override val id = "pan115"
     override val name = "115 网盘"
     override val loginUrl = "https://115.com/"
+    override val desc = "需登录。支持秒传与分享直下"
     override val cookieDomain = "https://115.com"
 
     private val api = "https://115cdn.com/webapi"

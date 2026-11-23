@@ -20,6 +20,7 @@ class QuarkDrive : Drive {
     override val id = "quark"
     override val name = "夸克网盘"
     override val loginUrl = "https://pan.quark.cn/"
+    override val desc = "免登录可解析。小文件直接下，大文件需登录或转存"
     override val cookieDomain = "https://pan.quark.cn"
 
     private val api = "https://drive-pc.quark.cn"

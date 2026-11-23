@@ -12,9 +12,10 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/surface"
-        app:title="xbox"
+        app:title="starbox"
         app:titleTextAppearance="@style/Xbox.Title"
-        app:titleTextColor="?attr/colorPrimary" />
+        app:titleTextColor="?attr/colorPrimary"
+        app:menu="@menu/top_bar" />
 
     <androidx.fragment.app.FragmentContainerView
         android:id="@+id/container"

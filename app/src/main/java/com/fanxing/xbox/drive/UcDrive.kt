@@ -18,6 +18,7 @@ class UcDrive : Drive {
     override val id = "uc"
     override val name = "UC 网盘"
     override val loginUrl: String? = null
+    override val desc = "免登录解析下载。游客通道有大小限制，超限可用「转存后下载」"
 
     private val api = "https://pc-api.uc.cn"
 

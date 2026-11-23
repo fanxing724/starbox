@@ -40,6 +40,9 @@ interface Drive {
     /** 该登录页下需要抓取的凭据域名 */
     val cookieDomain: String get() = ""
 
+    /** 该网盘的特点说明（展示在「支持列表」里） */
+    val desc: String get() = ""
+
     fun match(url: String): Boolean
     fun parse(url: String): ShareRef
 
