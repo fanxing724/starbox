@@ -1,5 +1,7 @@
 # starbox
 
+[![Build APK](https://github.com/fanxing724/starbox/actions/workflows/build.yml/badge.svg)](https://github.com/fanxing724/starbox/actions/workflows/build.yml)
+
 安卓网盘下载器 · 全本地 · 全开源 · 零 native 依赖
 
 粘贴分享链接 → 解析文件列表 → 多线程分片下载。所有解析与下载都在设备本地完成，**不经过任何第三方服务器**。
@@ -76,7 +78,32 @@ keyAlias=...
 keyPassword=...
 ```
 
-未提供该文件时，release 构建会因缺少签名配置而失败；debug 构建同理。请自备 keystore。
+未提供该文件时会自动降级：debug 使用默认调试 key，release 产出 **未签名包**（`app-release-unsigned.apk`）。
+
+## 自动打包（GitHub Actions）
+
+推送到 `main`、提交 Pull Request、或打 `v*` 标签时自动构建，产物在 Actions 的 Artifacts 里；**打标签还会自动发布 Release** 并附上 APK 与 `SHA256SUMS.txt`。也可在 Actions 页面手动触发。
+
+默认产出：
+
+| 文件 | 说明 |
+|---|---|
+| `starbox-<版本>-debug.apk` | CI 调试签名，可直接安装 |
+| `starbox-<版本>-release-unsigned.apk` | 未签名，需自行签名后才能安装 |
+
+**想让 CI 产出正式签名包**，在仓库 Settings → Secrets and variables → Actions 里配置：
+
+| Secret | 内容 |
+|---|---|
+| `KEYSTORE_BASE64` | keystore 文件的 base64（`base64 -w0 your.jks`） |
+| `KEYSTORE_PASSWORD` | store 密码 |
+| `KEY_ALIAS` | 别名，留空默认 `starbox` |
+| `KEY_PASSWORD` | key 密码 |
+
+配置后 release 产物变为 `starbox-<版本>-release.apk`（正式签名，可覆盖升级）。
+
+> 密钥只存在于 GitHub Secrets 与 CI 运行期，**不会进入仓库**。
+> 注意：CI 调试签名包与正式签名包**签名不同**，互相覆盖安装会失败，需先卸载。
 
 ## 架构
 

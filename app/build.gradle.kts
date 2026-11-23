@@ -5,10 +5,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// 签名凭据从本地 keystore.properties 读取，不写进代码、不进版本库
+// 签名凭据从本地 keystore.properties 读取，不写进代码、不进版本库。
+// CI 上没有该文件时自动降级：debug 用默认调试 key，release 产出未签名包。
 val ksPropsFile = rootProject.file("keystore.properties")
+val hasKeystore = ksPropsFile.exists()
 val ksProps = Properties().apply {
-    if (ksPropsFile.exists()) ksPropsFile.inputStream().use { load(it) }
+    if (hasKeystore) ksPropsFile.inputStream().use { load(it) }
 }
 
 android {
@@ -19,13 +21,13 @@ android {
         applicationId = "com.fanxing.xbox"
         minSdk = 24
         targetSdk = 34
-        versionCode = 18
-        versionName = "0.9.8"
+        versionCode = 19
+        versionName = "0.9.9"
     }
 
     signingConfigs {
-        create("starbox") {
-            if (ksPropsFile.exists()) {
+        if (hasKeystore) {
+            create("starbox") {
                 storeFile = rootProject.file(ksProps.getProperty("storeFile"))
                 storePassword = ksProps.getProperty("storePassword")
                 keyAlias = ksProps.getProperty("keyAlias")
@@ -37,11 +39,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("starbox")
+            // 有正式 key 就签，没有就产出未签名包（CI 默认情况）
+            if (hasKeystore) signingConfig = signingConfigs.getByName("starbox")
         }
         debug {
-            // debug 也用同一把正式 key，保证后续版本能覆盖升级
-            signingConfig = signingConfigs.getByName("starbox")
+            // 本地有正式 key 时 debug 也用它，保证覆盖升级；CI 上退回默认调试 key
+            if (hasKeystore) signingConfig = signingConfigs.getByName("starbox")
         }
     }
     compileOptions {

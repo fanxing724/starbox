@@ -1,0 +1,107 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare signing (optional)
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PW: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PW: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            mkdir -p keystore
+            printf '%s' "$KS_B64" | base64 -d > keystore/starbox.jks
+            printf 'storeFile=keystore/starbox.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$KS_PW" "${KS_ALIAS:-starbox}" "$KEY_PW" > keystore.properties
+            chmod 600 keystore.properties keystore/starbox.jks
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+            echo "已配置正式签名"
+          else
+            echo "SIGNED=0" >> "$GITHUB_ENV"
+            echo "未配置密钥，release 将产出未签名包"
+          fi
+
+      - name: Read version
+        run: |
+          V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "版本 $V"
+
+      - name: Build
+        run: ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          REL=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          DBG=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ "$SIGNED" = "1" ]; then
+            cp "$REL" "out/starbox-${VERSION}-release.apk"
+          else
+            cp "$REL" "out/starbox-${VERSION}-release-unsigned.apk"
+          fi
+          cp "$DBG" "out/starbox-${VERSION}-debug.apk"
+          ls -la out
+          cd out && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: starbox-${{ env.VERSION }}
+          path: out/*
+          retention-days: 30
+
+      - name: Publish Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            ## starbox ${{ github.ref_name }}
+
+            安卓网盘下载器 · 全本地 · 全开源 · 零 native 依赖
+
+            **安装说明**
+            - `*-release.apk`：配置了签名密钥时为正式签名包，可直接覆盖升级
+            - `*-release-unsigned.apk`：未配置密钥时的产物，**未签名无法直接安装**，需自行签名
+            - `*-debug.apk`：CI 调试签名包，可直接安装；与正式签名包**签名不同，需先卸载旧版**
+
+            校验值见 `SHA256SUMS.txt`。
+
+            本应用以 AGPL-3.0 授权，源码即本仓库。
