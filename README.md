@@ -57,7 +57,7 @@
 需要 **JDK 17+** 与 **Android SDK（compileSdk 34）**。
 
 ```bash
-git clone <repo>
+git clone https://github.com/fanxing724/starbox.git
 cd starbox
 echo "sdk.dir=/path/to/Android/Sdk" > local.properties
 ./gradlew assembleDebug

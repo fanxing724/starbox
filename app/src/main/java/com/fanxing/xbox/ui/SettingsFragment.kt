@@ -89,7 +89,8 @@ class SettingsFragment : Fragment() {
         row("隐私政策", "无服务器 · 无埋点 · 数据只留本地", "") { openLegal("privacy") }
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
-        row("starbox", "版本 0.9.1 · 14 家网盘 · AGPL-3.0", "") {}
+        row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
+        row("starbox", "版本 0.9.2 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {
@@ -157,6 +158,34 @@ class SettingsFragment : Fragment() {
                 input.text.toString().toIntOrNull()?.let(onOk) ?: toast("请输入数字")
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showSource() {
+        val url = "https://github.com/fanxing724/starbox"
+        AlertDialog.Builder(requireContext())
+            .setTitle("获取源代码")
+            .setMessage(
+                "本应用以 AGPL-3.0 授权。按照该许可证，向您提供本程序的完整对应源码：\n\n" +
+                    "$url\n\n" +
+                    "克隆命令：\n" +
+                    "git clone $url.git\n\n" +
+                    "源码含全部网盘驱动、下载引擎与界面代码，" +
+                    "不含签名密钥（需自备 keystore）。"
+            )
+            .setPositiveButton("打开仓库") { _, _ ->
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                }.onFailure { toast("没有可用的浏览器") }
+            }
+            .setNeutralButton("复制地址") { _, _ ->
+                val cm = requireContext()
+                    .getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("starbox", url))
+                toast("已复制")
+            }
+            .setNegativeButton("关闭", null)
             .show()
     }
 
