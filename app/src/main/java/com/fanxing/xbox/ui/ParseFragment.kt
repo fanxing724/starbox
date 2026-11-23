@@ -139,12 +139,14 @@ class ParseFragment : Fragment() {
         if (d == null) { setStatus("无法识别该链接。支持：${Registry.names}"); return }
         drive = d
         dirStack.clear()
+        com.fanxing.xbox.store.AppLog.i("Parse", "识别=${d.id} url=$url")
         setStatus("识别为 ${d.name}，正在解析…")
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val sh = withContext(Dispatchers.IO) { d.parse(url) }
                 share = sh
                 val list = withContext(Dispatchers.IO) { d.list(sh, null) }
+                com.fanxing.xbox.store.AppLog.i("Parse", "${d.id} 列表 ${list.size} 项")
                 files = list
                 adapter.submit(list)
                 updateEmpty(); updateDownloadButton(); updateNav()
@@ -159,6 +161,7 @@ class ParseFragment : Fragment() {
                 }
                 setStatus("${d.name} · ${list.size} 项" + hint)
             } catch (e: Exception) {
+                com.fanxing.xbox.store.AppLog.err("Parse", "${d.id} 解析失败", e)
                 setStatus("解析失败：${e.message}")
             }
         }
@@ -208,7 +211,9 @@ class ParseFragment : Fragment() {
             var ok = 0
             for (f in picked) {
                 try {
+                    com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链 ${f.name} size=${f.size} personal=${f.meta["personal"] ?: "0"}")
                     val link = withContext(Dispatchers.IO) { d.link(sh, f) }
+                    com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链成功 节点数=${if (CredsHolder.useMirror) link.mirrors.size + 1 else 1}")
                     val sources =
                         if (CredsHolder.useMirror) expandMirrors(link.url, link.mirrors)
                         else listOf(link.url)
@@ -230,6 +235,7 @@ class ParseFragment : Fragment() {
                     )
                     ok++
                 } catch (e: Exception) {
+                    com.fanxing.xbox.store.AppLog.err("Link", "${d.id} 「${f.name}」失败", e)
                     setStatus("「${f.name}」失败：${e.message}")
                 }
             }
@@ -262,10 +268,13 @@ class ParseFragment : Fragment() {
                 setStatus("正在转存…")
                 viewLifecycleOwner.lifecycleScope.launch {
                     try {
+                        com.fanxing.xbox.store.AppLog.i("Transfer", "${d.id} 开始转存 ${picked.size} 个")
                         val saved = withContext(Dispatchers.IO) { d.transfer(sh, picked) }
+                        com.fanxing.xbox.store.AppLog.i("Transfer", "${d.id} 转存成功 ${saved.size} 个")
                         setStatus("转存完成，开始下载")
                         enqueue(d, sh, saved)
                     } catch (e: Exception) {
+                        com.fanxing.xbox.store.AppLog.err("Transfer", "${d.id} 转存失败", e)
                         setStatus("转存失败：${e.message}")
                     }
                 }

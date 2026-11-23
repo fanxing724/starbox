@@ -206,6 +206,7 @@ object Engine {
                     } catch (e: Exception) {
                         next.state = State.ERROR
                         next.error = e.message ?: e.toString()
+                    com.fanxing.xbox.store.AppLog.err("DL", "任务失败 ${next.name}", e)
                     } finally {
                         synchronized(queueLock) {
                             next.running = false
@@ -234,8 +235,10 @@ object Engine {
         metaFile(t).parentFile?.mkdirs()
 
         // 1) 探测真实大小：必须用 Range，UC 的 HEAD 返回的 Content-Length 是错的
+        com.fanxing.xbox.store.AppLog.i("DL", "开始 ${t.name} 源数=${t.sources.size} 预设大小=${t.size}")
         if (t.size <= 0) t.size = probeSize(t)
         if (t.size <= 0) throw DriveErr("无法获取文件大小（服务器未返回 Content-Range）")
+        com.fanxing.xbox.store.AppLog.i("DL", "探测大小=${t.size} 分片数=${t.chunks.size}")
 
         // 2) 载入/建立分片
         if (!loadMeta(t)) buildChunks(t, connectionsFor(t))
@@ -274,6 +277,7 @@ object Engine {
                 if (!ChunkMath.covers(t.chunks, t.size) || (actual >= 0 && actual != t.size)) {
                     t.state = State.ERROR
                     t.error = "长度校验失败：分片 $covered / 落盘 $actual / 期望 ${t.size}"
+                    com.fanxing.xbox.store.AppLog.e("DL", "长度校验失败 分片=$covered 落盘=$actual 期望=${t.size}")
                 } else {
                     // 必须发布成功才算完成，否则界面显示完成但文件管理器看不到
                     val published = com.fanxing.xbox.store.Storage.finish(
@@ -284,10 +288,12 @@ object Engine {
                     )
                     if (published) {
                         t.state = State.DONE
+                        com.fanxing.xbox.store.AppLog.i("DL", "完成 ${t.name} ${t.size}B")
                         metaFile(t).delete()
                     } else {
                         t.state = State.ERROR
                         t.error = "文件已下完，但发布到 Download 失败，请点继续重试"
+                        com.fanxing.xbox.store.AppLog.e("DL", "MediaStore 发布失败 ${t.name}")
                     }
                 }
             } else {
@@ -325,6 +331,7 @@ object Engine {
             if (r.code == 200) {
                 r.header("Content-Length")?.toLongOrNull()?.let { if (it > 0) return it }
             }
+            com.fanxing.xbox.store.AppLog.e("DL", "探测失败 HTTP ${r.code} CR=${r.header("Content-Range")} CL=${r.header("Content-Length")}")
             throw DriveErr("探测失败 HTTP ${r.code}")
         }
     }
@@ -388,6 +395,7 @@ object Engine {
                 if (t.cancelFlag.get()) return
                 attempt++
                 t.error = e.message ?: "分片重试"
+                com.fanxing.xbox.store.AppLog.w("DL", "分片 ${c.index} 第 $attempt 次失败：${e.message}")
                 delay(800L * attempt)
             }
         }

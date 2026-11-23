@@ -71,13 +71,18 @@ class SettingsFragment : Fragment() {
             DrivesDialog.show(requireActivity())
         }
 
+        section("排查")
+        row("运行日志", "记录解析/转存/取链/下载各步与错误码，已脱敏", "${com.fanxing.xbox.store.AppLog.entries().size} 条") {
+            startActivity(Intent(requireContext(), LogsActivity::class.java))
+        }
+
         section("关于")
         row("用户协议", "使用条款与责任范围", "") { openLegal("agreement") }
         row("隐私政策", "无服务器 · 无埋点 · 数据只留本地", "") { openLegal("privacy") }
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.17 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.18 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {

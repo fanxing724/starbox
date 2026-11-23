@@ -84,9 +84,12 @@ class QuarkDrive : Drive {
         Http.api.newCall(req).execute().use { r ->
             capturePugs(r.headers("Set-Cookie"))
             val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
-            return runCatching { JSONObject(txt) }.getOrElse {
+            val j = runCatching { JSONObject(txt) }.getOrElse {
+                com.fanxing.xbox.store.AppLog.e("Quark", "响应非 JSON HTTP ${r.code} body=${txt.take(200)}")
                 throw DriveError("夸克：响应非 JSON（HTTP ${r.code}）")
             }
+            com.fanxing.xbox.store.AppLog.i("Quark", "HTTP ${r.code} code=${j.optInt("code")} msg=${j.optString("message")}")
+            return j
         }
     }
 
@@ -191,6 +194,7 @@ class QuarkDrive : Drive {
     private fun authPost(url: String, body: JSONObject): JSONObject {
         val ck = loginCookie
         if (ck.isBlank()) throw DriveError("夸克：转存需要先登录，请在设置里登录夸克")
+        com.fanxing.xbox.store.AppLog.d("Quark", "POST ${url.substringAfter("/1/clouddrive/").substringBefore("?")}")
         val b = Request.Builder().url(url).post(Http.json(body.toString()))
             .header("Cookie", ck)
             .header("User-Agent", uaQuark)
@@ -199,9 +203,12 @@ class QuarkDrive : Drive {
             .header("Content-Type", "application/json;charset=UTF-8")
         Http.api.newCall(b.build()).execute().use { r ->
             val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
-            return runCatching { JSONObject(txt) }.getOrElse {
+            val j = runCatching { JSONObject(txt) }.getOrElse {
+                com.fanxing.xbox.store.AppLog.e("Quark", "响应非 JSON HTTP ${r.code} body=${txt.take(200)}")
                 throw DriveError("夸克：响应非 JSON（HTTP ${r.code}）")
             }
+            com.fanxing.xbox.store.AppLog.i("Quark", "HTTP ${r.code} code=${j.optInt("code")} msg=${j.optString("message")}")
+            return j
         }
     }
 
@@ -211,8 +218,9 @@ class QuarkDrive : Drive {
             JSONObject().put("pdir_fid", "0").put("file_name", "starbox临时转存")
                 .put("dir_path", "").put("dir_init_lock", false)
         )
-        return j.optJSONObject("data")?.optString("fid")?.takeIf { it.isNotBlank() }
-            ?: throw DriveError("夸克：创建转存目录失败 ${j.optString("message")}")
+        val fid = j.optJSONObject("data")?.optString("fid")?.takeIf { it.isNotBlank() }
+        com.fanxing.xbox.store.AppLog.i("Quark", "临时目录 fid=${fid ?: "null"}")
+        return fid ?: throw DriveError("夸克：创建转存目录失败 ${j.optString("message")}")
     }
 
     private fun pollTask(taskId: String): String {
@@ -238,6 +246,7 @@ class QuarkDrive : Drive {
             }
             Thread.sleep(1000)
         }
+        com.fanxing.xbox.store.AppLog.e("Quark", "转存任务超时 task_id=$taskId")
         throw DriveError("夸克：转存任务超时，请到网盘里确认是否已保存")
     }
 
@@ -256,10 +265,13 @@ class QuarkDrive : Drive {
                     .put("scene", "link")
             )
             val taskId = j.optJSONObject("data")?.optString("task_id") ?: ""
+            com.fanxing.xbox.store.AppLog.i("Quark", "转存 ${f.name} → task_id=${taskId.ifBlank { "无" }} code=${j.optInt("code")} msg=${j.optString("message")}")
             if (taskId.isBlank()) {
                 throw DriveError("夸克：转存失败 ${j.optString("message")}（可能空间不足）")
             }
-            out.add(f.copy(id = pollTask(taskId), meta = mapOf("personal" to "1")))
+            val newFid = pollTask(taskId)
+            com.fanxing.xbox.store.AppLog.i("Quark", "转存完成 新 fid=$newFid")
+            out.add(f.copy(id = newFid, meta = mapOf("personal" to "1")))
         }
         return out
     }
@@ -270,6 +282,7 @@ class QuarkDrive : Drive {
             JSONObject().put("fids", JSONArray().put(file.id))
         )
         val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
+        com.fanxing.xbox.store.AppLog.i("Quark", "个人盘取链 fid=${file.id} → ${if (url.isBlank()) "失败 code=" + j.optInt("code") + " " + j.optString("message") else "OK"}")
         if (url.isBlank()) throw DriveError("夸克：个人盘取直链失败 ${j.optString("message")}")
         return DirectLink(
             url,
