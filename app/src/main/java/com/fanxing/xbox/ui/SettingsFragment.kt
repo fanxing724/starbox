@@ -72,7 +72,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.12 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.13 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {

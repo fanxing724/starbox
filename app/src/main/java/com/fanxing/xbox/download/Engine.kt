@@ -50,6 +50,10 @@ class Task(
         get() = if (size <= 0) 0 else ((downloaded * 100) / size).toInt().coerceIn(0, 100)
     internal var job: Job? = null
     internal val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 旧执行是否还在跑（防止快速暂停/继续时两份执行写同一文件） */
+    @Volatile internal var running: Boolean = false
+    /** 旧执行未退出时收到的继续请求，等它退出后再入队 */
+    @Volatile internal var resumeRequested: Boolean = false
 }
 
 /**
@@ -66,7 +70,10 @@ class Task(
 object Engine {
 
     @Volatile private lateinit var appCtx: Context
-    fun init(ctx: Context) { appCtx = ctx.applicationContext }
+    fun init(ctx: Context) {
+        appCtx = ctx.applicationContext
+        restoreFromDisk()
+    }
 
     /** 统一写入句柄。
      *  MediaStore 走 ParcelFileDescriptor + Os.pwrite（按偏移定位写，天然并发安全）；
@@ -105,6 +112,10 @@ object Engine {
             }
         }
 
+        fun length(): Long =
+            if (pfd != null) android.system.Os.fstat(pfd.fileDescriptor).st_size
+            else raf!!.length()
+
         override fun close() {
             runCatching { raf?.close() }
             runCatching { pfd?.close() }
@@ -119,6 +130,8 @@ object Engine {
     val tasks = CopyOnWriteArrayList<Task>()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val activeTasks = AtomicInteger(0)
+    /** 队列领取与状态转换必须串行，否则多个任务同时结束会重复领取 */
+    private val queueLock = Any()
     private const val MAX_TOTAL_CONNS = 512
 
     fun addListener(l: () -> Unit) { listeners.add(l) }
@@ -126,7 +139,10 @@ object Engine {
     private fun notifyUi() = main.post { listeners.forEach { runCatching { it() } } }
 
     fun submit(t: Task) {
-        tasks.add(t)
+        synchronized(queueLock) {
+            tasks.add(t)
+            persist(t)
+        }
         notifyUi()
         pump()
     }
@@ -134,54 +150,81 @@ object Engine {
     fun find(id: String): Task? = tasks.firstOrNull { it.id == id }
 
     fun pause(id: String) {
-        val t = find(id) ?: return
-        t.cancelFlag.set(true)
-        t.state = State.PAUSED
-        t.speed = 0
-        persist(t)
+        synchronized(queueLock) {
+            val t = find(id) ?: return
+            t.cancelFlag.set(true)
+            t.resumeRequested = false
+            if (!t.running) t.state = State.PAUSED
+            t.speed = 0
+            persist(t)
+        }
         notifyUi()
     }
 
     fun resume(id: String) {
-        val t = find(id) ?: return
-        if (t.state == State.RUNNING) return
-        t.cancelFlag.set(false)
-        t.state = State.QUEUED
-        t.error = ""
+        synchronized(queueLock) {
+            val t = find(id) ?: return
+            if (t.state == State.RUNNING && t.running) return
+            t.error = ""
+            if (t.running) {
+                // 旧执行还在收尾（可能卡在网络读），先记下意图，
+                // 等它退出并关闭写入句柄后再重新入队，避免两份执行写同一文件
+                t.resumeRequested = true
+                t.state = State.PAUSED
+            } else {
+                t.cancelFlag.set(false)
+                t.state = State.QUEUED
+            }
+        }
         notifyUi()
         pump()
     }
 
     fun remove(id: String) {
-        val t = find(id) ?: return
-        t.cancelFlag.set(true)
-        runCatching { com.fanxing.xbox.store.Storage.delete(appCtx, t.uri, t.savePath) }
-        runCatching { metaFile(t).delete() }
-        tasks.remove(t)
+        synchronized(queueLock) {
+            val t = find(id) ?: return
+            t.cancelFlag.set(true)
+            t.resumeRequested = false
+            runCatching { com.fanxing.xbox.store.Storage.delete(appCtx, t.uri, t.savePath) }
+            runCatching { metaFile(t).delete() }
+            tasks.remove(t)
+        }
         notifyUi()
     }
 
     private fun pump() {
-        while (activeTasks.get() < com.fanxing.xbox.store.CredsHolder.parallelTasks) {
-            val next = tasks.firstOrNull { it.state == State.QUEUED } ?: return
-            next.state = State.RUNNING
-            activeTasks.incrementAndGet()
-            next.job = scope.launch {
-                try {
-                    run(next)
-                } catch (e: Exception) {
-                    next.state = State.ERROR
-                    next.error = e.message ?: e.toString()
-                } finally {
-                    activeTasks.decrementAndGet()
-                    next.speed = 0
-                    persist(next)
-                    notifyUi()
-                    pump()
+        synchronized(queueLock) {
+            while (activeTasks.get() < com.fanxing.xbox.store.CredsHolder.parallelTasks) {
+                val next = tasks.firstOrNull { it.state == State.QUEUED && !it.running } ?: return
+                next.state = State.RUNNING
+                next.running = true
+                next.cancelFlag.set(false)
+                activeTasks.incrementAndGet()
+                next.job = scope.launch {
+                    try {
+                        run(next)
+                    } catch (e: Exception) {
+                        next.state = State.ERROR
+                        next.error = e.message ?: e.toString()
+                    } finally {
+                        synchronized(queueLock) {
+                            next.running = false
+                            activeTasks.decrementAndGet()
+                            next.speed = 0
+                            if (next.resumeRequested) {
+                                next.resumeRequested = false
+                                next.cancelFlag.set(false)
+                                next.state = State.QUEUED
+                            }
+                            persist(next)
+                        }
+                        notifyUi()
+                        pump()
+                    }
                 }
             }
-            notifyUi()
         }
+        notifyUi()
     }
 
     // ---------------- 核心 ----------------
@@ -225,20 +268,27 @@ object Engine {
             if (t.cancelFlag.get()) {
                 t.state = State.PAUSED
             } else if (t.chunks.all { it.finished }) {
-                // 完工校验：分片覆盖必须等于文件总长，否则宁可报错也不交付损坏文件
+                // 完工校验：分片覆盖 + 实际落盘长度都必须等于文件总长
                 val covered = t.chunks.sumOf { it.length }
-                if (covered != t.size) {
+                val actual = runCatching { sink.length() }.getOrDefault(-1L)
+                if (covered != t.size || (actual >= 0 && actual != t.size)) {
                     t.state = State.ERROR
-                    t.error = "分片覆盖 ${covered}B ≠ 文件 ${t.size}B，已中止以防损坏"
+                    t.error = "长度校验失败：分片 $covered / 落盘 $actual / 期望 ${t.size}"
                 } else {
-                    t.state = State.DONE
-                    metaFile(t).delete()
-                    com.fanxing.xbox.store.Storage.finish(
+                    // 必须发布成功才算完成，否则界面显示完成但文件管理器看不到
+                    val published = com.fanxing.xbox.store.Storage.finish(
                         appCtx,
                         com.fanxing.xbox.store.Storage.Target(
                             t.uri?.let { Uri.parse(it) }, null, t.name, t.displayPath
                         )
                     )
+                    if (published) {
+                        t.state = State.DONE
+                        metaFile(t).delete()
+                    } else {
+                        t.state = State.ERROR
+                        t.error = "文件已下完，但发布到 Download 失败，请点继续重试"
+                    }
                 }
             } else {
                 t.state = State.ERROR
@@ -318,12 +368,18 @@ object Engine {
                     } else if (r.code != 206) {
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
                     } else {
-                        // 206 也要校验起点，防止 CDN 返回错位区间
-                        val crStart = r.header("Content-Range")
-                            ?.substringAfter("bytes ", "")
-                            ?.substringBefore("-", "")?.trim()?.toLongOrNull()
-                        if (crStart != null && crStart != from) {
-                            throw DriveErr("分片 ${c.index} 起点错位：期望 $from 实得 $crStart")
+                        // 206 要完整校验区间：起点、终点、总大小
+                        val cr = r.header("Content-Range")
+                        val m = cr?.let { Regex("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)").find(it) }
+                        if (m != null) {
+                            val s = m.groupValues[1].toLong()
+                            val e = m.groupValues[2].toLong()
+                            val tot = m.groupValues[3]
+                            if (s != from) throw DriveErr("分片 ${c.index} 起点错位：期望 $from 实得 $s")
+                            if (e > c.end) throw DriveErr("分片 ${c.index} 响应区间超出请求范围")
+                            if (tot != "*" && tot.toLong() != t.size) {
+                                throw DriveErr("文件大小不符：期望 ${t.size} 实得 $tot")
+                            }
                         }
                     }
                     val body = r.body ?: throw DriveErr("分片 ${c.index} 空响应")
@@ -332,12 +388,16 @@ object Engine {
                         val buf = ByteArray(64 * 1024)
                         val input = body.byteStream()
                         while (!t.cancelFlag.get()) {
+                            val remain = c.end - pos + 1
+                            if (remain <= 0) break
                             val n = input.read(buf)
                             if (n <= 0) break
-                            sink.writeAt(pos, buf, n)
-                            pos += n
-                            c.done += n
-                            if (c.finished) break
+                            // 限长写入：服务器多发也不能越过本片边界去踩相邻分片
+                            val want = minOf(n.toLong(), remain).toInt()
+                            sink.writeAt(pos, buf, want)
+                            pos += want
+                            c.done += want
+                            if (want < n || c.finished) break
                         }
                     }
                 }
@@ -359,15 +419,73 @@ object Engine {
     // ---------------- 断点续传元数据 ----------------
 
     private fun persist(t: Task) {
-        if (t.size <= 0 || t.chunks.isEmpty()) return
-        runCatching {
-            val arr = JSONArray()
-            t.chunks.forEach { c ->
-                arr.put(JSONObject().put("i", c.index).put("s", c.start).put("e", c.end).put("d", c.done))
+        if (t.size <= 0) return
+        // 心跳与暂停可能同时触发，必须串行 + 原子替换，避免写半截 JSON
+        synchronized(t) {
+            runCatching {
+                val arr = JSONArray()
+                t.chunks.forEach { c ->
+                    arr.put(JSONObject().put("i", c.index).put("s", c.start).put("e", c.end).put("d", c.done))
+                }
+                val src = JSONArray(); t.sources.forEach { src.put(it) }
+                val hdr = JSONObject(); t.headers.forEach { (k, v) -> hdr.put(k, v) }
+                val o = JSONObject()
+                    .put("size", t.size).put("name", t.name).put("chunks", arr)
+                    // 任务描述符：进程重启后据此重建队列
+                    .put("id", t.id).put("sources", src).put("headers", hdr)
+                    .put("savePath", t.savePath)
+                    .put("uri", t.uri ?: "")
+                    .put("displayPath", t.displayPath)
+                val f = metaFile(t)
+                f.parentFile?.mkdirs()
+                val tmp = File(f.absolutePath + ".tmp")
+                tmp.writeText(o.toString())
+                if (!tmp.renameTo(f)) { f.writeText(o.toString()); tmp.delete() }
             }
-            val o = JSONObject()
-                .put("size", t.size).put("name", t.name).put("chunks", arr)
-            metaFile(t).writeText(o.toString())
+        }
+    }
+
+    /** 进程重启后从磁盘重建未完成任务（一律置为暂停，由用户决定何时继续） */
+    fun restoreFromDisk() {
+        val dir = File(appCtx.filesDir, "meta")
+        val files = dir.listFiles { f -> f.name.endsWith(".json") } ?: return
+        val restored = ArrayList<Task>()
+        files.forEach { f ->
+            runCatching {
+                val o = JSONObject(f.readText())
+                val id = o.optString("id").ifBlank { return@runCatching }
+                if (tasks.any { it.id == id }) return@runCatching
+                val srcArr = o.optJSONArray("sources") ?: return@runCatching
+                val sources = (0 until srcArr.length()).map { srcArr.getString(it) }
+                if (sources.isEmpty()) return@runCatching
+                val hdrObj = o.optJSONObject("headers") ?: JSONObject()
+                val headers = hdrObj.keys().asSequence().associateWith { hdrObj.getString(it) }
+                val t = Task(
+                    id = id,
+                    name = o.optString("name"),
+                    sources = sources,
+                    headers = headers,
+                    savePath = o.optString("savePath"),
+                    uri = o.optString("uri").ifBlank { null },
+                    displayPath = o.optString("displayPath"),
+                    size = o.optLong("size"),
+                    state = State.PAUSED
+                )
+                val arr = o.optJSONArray("chunks") ?: JSONArray()
+                for (i in 0 until arr.length()) {
+                    val c = arr.getJSONObject(i)
+                    t.chunks.add(Chunk(c.optInt("i", i), c.getLong("s"), c.getLong("e"), c.optLong("d")))
+                }
+                if (t.chunks.isNotEmpty() && t.chunks.all { it.finished }) {
+                    f.delete()   // 已下完的残留元数据，清掉
+                } else {
+                    restored.add(t)
+                }
+            }
+        }
+        if (restored.isNotEmpty()) {
+            synchronized(queueLock) { tasks.addAll(restored) }
+            notifyUi()
         }
     }
 
@@ -387,7 +505,6 @@ object Engine {
         }.getOrDefault(false)
     }
 
-    fun restore(t: Task) { submit(t) }
 }
 
 class DriveErr(msg: String) : Exception(msg)

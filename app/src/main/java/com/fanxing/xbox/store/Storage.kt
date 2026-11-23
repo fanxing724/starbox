@@ -113,17 +113,19 @@ object Storage {
         return Target(null, f, name, f.absolutePath)
     }
 
-    /** 下载完成后解除 pending，让文件管理器/其他应用可见 */
-    fun finish(ctx: Context, t: Target) {
+    /** 下载完成后解除 pending，让文件管理器/其他应用可见。返回是否发布成功 */
+    fun finish(ctx: Context, t: Target): Boolean {
         if (Build.VERSION.SDK_INT >= 29 && t.uri != null) {
-            runCatching {
-                ctx.contentResolver.update(
+            return runCatching {
+                val n = ctx.contentResolver.update(
                     t.uri,
                     ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
                     null, null
                 )
-            }
+                n > 0
+            }.getOrDefault(false)
         }
+        return true   // 旧系统走 File，写完即可见
     }
 
     fun delete(ctx: Context, uri: String?, path: String?) {
