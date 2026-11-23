@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 先看 README 的实测状态
+    url: https://github.com/fanxing724/starbox#实测状态
+    about: 多数网盘只做过接口核对，未经真机验证。先确认你用的那家处于什么状态。
