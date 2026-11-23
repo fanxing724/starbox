@@ -30,8 +30,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Ensure Android SDK packages
+        run: |
+          set -e
+          echo "ANDROID_HOME=${ANDROID_HOME:-未设置}"
+          SDKMGR=""
+          for c in "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+                   "$ANDROID_HOME/cmdline-tools/bin/sdkmanager" \
+                   "$ANDROID_HOME/tools/bin/sdkmanager"; do
+            if [ -x "$c" ]; then SDKMGR="$c"; break; fi
+          done
+          if [ -z "$SDKMGR" ]; then SDKMGR="$(command -v sdkmanager || true)"; fi
+          if [ -z "$SDKMGR" ]; then echo "找不到 sdkmanager"; exit 1; fi
+          echo "使用 $SDKMGR"
+          yes | "$SDKMGR" --licenses > /dev/null 2>&1 || true
+          "$SDKMGR" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
