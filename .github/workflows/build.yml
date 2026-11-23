@@ -76,7 +76,19 @@ jobs:
           echo "版本 $V"
 
       - name: Build
-        run: ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Report build failure
+        if: failure()
+        run: |
+          {
+            echo "## 构建失败日志（尾部 150 行）"
+            echo '```'
+            tail -n 150 build.log 2>/dev/null || echo "无 build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Collect artifacts
         run: |
