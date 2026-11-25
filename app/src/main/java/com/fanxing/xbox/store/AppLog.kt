@@ -119,6 +119,9 @@ object AppLog {
 
     fun entries(): List<Entry> = synchronized(lock) { buf.toList() }
 
+    /** 与落盘/解析一致的展示格式 */
+    fun formatTime(t: Long): String = fmt.format(Date(t))
+
     /** 供单测直接调用纯解析逻辑 */
     internal fun testDecode(lines: List<String>) = LogCodec.decode(lines)
     internal fun testParse(line: String) = LogCodec.parse(line, 0L)
@@ -129,7 +132,7 @@ object AppLog {
 
     fun text(): String {
         val full = entries().joinToString("\n") {
-            "${fmt.format(Date(it.time))} ${it.level.name}/${it.tag}: ${it.msg}"
+            "${formatTime(it.time)} ${it.level.name}/${it.tag}: ${it.msg}"
         }
         if (full.length <= RENDER_LIMIT) return full
         val head = full.take(RENDER_LIMIT * 2 / 3)

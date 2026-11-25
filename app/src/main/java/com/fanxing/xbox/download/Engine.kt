@@ -394,6 +394,7 @@ object Engine {
 
     private suspend fun fetchChunk(t: Task, c: Chunk, sink: Sink) {
         var attempt = 0
+        var lastErr = ""
         while (!c.finished && !t.cancelFlag.get() && attempt < 6) {
             try {
                 val from = c.start + c.done
@@ -452,11 +453,19 @@ object Engine {
                 if (t.cancelFlag.get()) return
                 attempt++
                 t.error = e.message ?: "分片重试"
-                com.fanxing.xbox.store.AppLog.w("DL", "分片 ${c.index} 第 $attempt 次失败：${e.message}")
+                lastErr = e.message ?: ""
+                // 逐片每轮都刷会把日志冲爆（36 片 × 6 轮 ≈ 400 行），
+                // 只在第 1 轮详记，后续只累计，耗尽时统一报。
+                if (attempt == 1) {
+                    com.fanxing.xbox.store.AppLog.w("DL", "分片 ${c.index} 首次失败：${e.message}")
+                }
                 delay(800L * attempt)
             }
         }
         if (!c.finished && !t.cancelFlag.get()) {
+            com.fanxing.xbox.store.AppLog.e(
+                "DL", "分片 ${c.index} 重试 $attempt 次后仍失败：${lastErr}"
+            )
             throw DriveErr("分片 ${c.index} 重试耗尽")
         }
     }

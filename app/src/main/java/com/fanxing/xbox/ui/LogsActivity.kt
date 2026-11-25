@@ -22,6 +22,21 @@ class LogsActivity : AppCompatActivity() {
         setContentView(b.root)
         b.toolbar.setNavigationOnClickListener { finish() }
 
+        // 级别过滤：全部 / 仅警告以上 / 仅错误
+        val levels = arrayOf("全部", "警告以上", "仅错误")
+        b.levelFilter.adapter = android.widget.ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, levels
+        )
+        b.levelFilter.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) = render()
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+        b.keyword.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b1: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b1: Int, c: Int) = render()
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+
         b.btnRefresh.setOnClickListener { render() }
         b.btnCopy.setOnClickListener {
             val t = AppLog.text()
@@ -45,8 +60,30 @@ class LogsActivity : AppCompatActivity() {
     private fun render() {
         // 渲染失败不能把整个页面带崩，否则恰好丢掉要看的现场
         runCatching {
-            val list = AppLog.entries()
-            b.content.text = if (list.isEmpty()) "（暂无日志）" else AppLog.text()
+            var list = AppLog.entries()
+            // 级别过滤
+            when (b.levelFilter.selectedItemPosition) {
+                1 -> list = list.filter { it.level == com.fanxing.xbox.store.AppLog.Level.W || it.level == com.fanxing.xbox.store.AppLog.Level.E }
+                2 -> list = list.filter { it.level == com.fanxing.xbox.store.AppLog.Level.E }
+            }
+            // 关键字过滤（标签或内容命中，大小写不敏感）
+            val kw = b.keyword.text?.toString()?.trim().orEmpty()
+            if (kw.isNotEmpty()) {
+                list = list.filter { it.tag.contains(kw, true) || it.msg.contains(kw, true) }
+            }
+            val shown = list.size
+            val total = AppLog.entries().size
+            b.toolbar.subtitle = "显示 $shown / 共 $total 条"
+            if (list.isEmpty()) {
+                b.content.text = if (total == 0) "（暂无日志）" else "（当前过滤条件下无匹配）"
+            } else {
+                val body = list.joinToString("\n") {
+                    "${com.fanxing.xbox.store.AppLog.formatTime(it.time)} ${it.level.name}/${it.tag}: ${it.msg}"
+                }
+                b.content.text = if (body.length > 60_000)
+                    body.take(40_000) + "\n……（中间省略，请用「导出」取完整内容）\n" + body.takeLast(20_000)
+                else body
+            }
         // 崩后重开时明确告知：这里含上一次运行/崩溃的现场
         b.hint.text = when {
             AppLog.hasPreviousLog ->
