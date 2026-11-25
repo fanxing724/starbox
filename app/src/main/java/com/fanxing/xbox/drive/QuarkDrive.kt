@@ -373,6 +373,19 @@ class QuarkDrive : Drive {
         }
     }
 
+
+    /**
+     * 下载直链用的 Cookie：登录态凭据 + 游客令牌 __pugs。
+     * ★ CDN 只认 __pugs，缺了直接 HTTP 412；而 WebView 抓来的 Cookie
+     *   未必含它（域不同），必须显式合并，不能想当然。
+     */
+    private fun downloadCookie(): String {
+        val parts = ArrayList<String>()
+        if (loginCookie.isNotBlank()) parts.add(loginCookie)
+        if (pugs.isNotBlank()) parts.add("__pugs=$pugs")
+        return parts.joinToString("; ")
+    }
+
     private fun personalLink(file: RemoteFile): DirectLink {
         val tk = runCatching { socialToken() }.getOrDefault("")
         val body = JSONObject().put("fids", JSONArray().put(file.id))
@@ -396,12 +409,21 @@ class QuarkDrive : Drive {
         val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
         com.fanxing.xbox.store.AppLog.i("Quark", "个人盘取链 fid=${file.id} → ${if (url.isBlank()) "失败 code=" + j.optInt("code") + " " + j.optString("message") else "OK"}")
         if (url.isBlank()) throw DriveError("夸克：个人盘取直链失败 ${j.optString("message")}")
+        val ck = downloadCookie()
+        com.fanxing.xbox.store.AppLog.i(
+            "Quark",
+            "下载头 Cookie 段数=${ck.split(";").size} 含__pugs=${if (pugs.isNotBlank()) "是" else "否"}"
+        )
+        if (pugs.isBlank()) {
+            // 记下来但不下结论：有些 URL 的签名已足够，412 也可能另有原因
+            com.fanxing.xbox.store.AppLog.w("Quark", "__pugs 为空，若 CDN 返回 412 即为缺此 Cookie 所致")
+        }
         return DirectLink(
             url,
             mapOf(
                 "User-Agent" to uaPcNew,
                 "Referer" to "https://pan.quark.cn/",
-                "Cookie" to loginCookie
+                "Cookie" to ck
             )
         )
     }

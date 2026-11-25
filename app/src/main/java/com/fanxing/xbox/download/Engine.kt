@@ -410,6 +410,12 @@ object Engine {
                             throw DriveErr("服务器不支持 Range（HTTP 200），无法分片下载")
                         }
                     } else if (r.code != 206) {
+                        val snippet = runCatching {
+                            r.peekBody(200).string()
+                        }.getOrDefault("")
+                        com.fanxing.xbox.store.AppLog.e(
+                            "DL", "片${c.index} HTTP ${r.code} 响应=${snippet.ifBlank { "(空)" }}"
+                        )
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
                     } else {
                         // 206 要完整校验区间：起点、终点、总大小
@@ -519,6 +525,11 @@ object Engine {
                     f.delete()   // 已下完的残留元数据，清掉
                 } else {
                     restored.add(t)
+                    com.fanxing.xbox.store.AppLog.w(
+                        "DL",
+                        "从断点恢复 ${t.name}（未完成 ${t.chunks.count { !it.finished }} 片）；" +
+                            "若直链已失效或返回 401/403/412，请删除后重新解析下载"
+                    )
                 }
             }
         }
