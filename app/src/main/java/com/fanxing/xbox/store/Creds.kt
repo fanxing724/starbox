@@ -23,7 +23,7 @@ class Creds(ctx: Context) {
 
     // ---- 下载参数 ----
     var connections: Int
-        get() = sp.getInt("conns", 32)
+        get() = sp.getInt("conns", 16)
         set(v) = sp.edit().putInt("conns", v.coerceIn(1, 512)).apply()
 
     /** 同时下载的任务数 */
