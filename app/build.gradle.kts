@@ -21,8 +21,8 @@ android {
         applicationId = "com.fanxing.xbox"
         minSdk = 24
         targetSdk = 34
-        versionCode = 43
-        versionName = "0.9.33"
+        versionCode = 44
+        versionName = "0.9.34"
     }
 
     signingConfigs {

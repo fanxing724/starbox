@@ -435,13 +435,29 @@ class QuarkDrive : Drive {
             // 记下来但不下结论：有些 URL 的签名已足够，412 也可能另有原因
             com.fanxing.xbox.store.AppLog.w("Quark", "__pugs 为空，若 CDN 返回 412 即为缺此 Cookie 所致")
         }
+        // ★ 补齐浏览器才有的头。
+        // LinkSwift 之类能在浏览器里成功，靠的是完整请求头；
+        // 只发 Cookie/UA/Referer 会让 CDN 的前置条件校验（Tengine 412）判为异常客户端。
+        val dlHeaders = linkedMapOf(
+            "User-Agent" to uaPcNew,
+            "Referer" to "https://pan.quark.cn/",
+            "Origin" to "https://pan.quark.cn",
+            "Accept" to "*/*",
+            "Accept-Language" to "zh-CN,zh;q=0.9,en;q=0.8",
+            "Sec-Fetch-Dest" to "empty",
+            "Sec-Fetch-Mode" to "cors",
+            "Sec-Fetch-Site" to "same-origin",
+            "Sec-Ch-Ua" to "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not-A.Brand\";v=\"99\"",
+            "Sec-Ch-Ua-Mobile" to "?0",
+            "Sec-Ch-Ua-Platform" to "\"Windows\"",
+            "Cookie" to ck
+        )
+        com.fanxing.xbox.store.AppLog.i(
+            "Quark", "下载头字段数=${dlHeaders.size}（含 Origin/Sec-Fetch 等浏览器特征）"
+        )
         return DirectLink(
             url,
-            mapOf(
-                "User-Agent" to uaPcNew,
-                "Referer" to "https://pan.quark.cn/",
-                "Cookie" to ck
-            ),
+            dlHeaders,
             alternates = if (altUrl.isNotBlank()) listOf(altUrl) else emptyList()
         )
     }

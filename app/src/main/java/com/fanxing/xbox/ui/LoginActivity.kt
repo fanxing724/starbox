@@ -102,8 +102,15 @@ class LoginActivity : AppCompatActivity() {
                 }
                 runCatching {
                     val o = org.json.JSONObject(raw)
-                    o.optString(drive.id).takeIf { it.isNotBlank() }
-                        ?.let { Creds.get(this).setToken(drive.id, it) }
+                    // TOKEN_JS 写出的键是固定几个（xunlei/aliyun），
+                    // 需要按 drive.id 再兜一次：直接取不到就尝试通用键
+                    val tk = o.optString(drive.id).ifBlank {
+                        when (drive.id) {
+                            "quark" -> o.optString("xunlei")   // 同源码家族，令牌结构一致
+                            else -> ""
+                        }
+                    }
+                    tk.takeIf { it.isNotBlank() }?.let { Creds.get(this).setToken(drive.id, it) }
                 }
             }
             Toast.makeText(this, "已保存 ${drive.name} 登录凭据", Toast.LENGTH_SHORT).show()
