@@ -473,6 +473,25 @@ object Engine {
                             switched = true
                             return@use   // 不在 inline lambda 里 continue（属实验特性），改由外层处理
                         }
+                        // ★ 决定性诊断：把「我发了什么头」和「CDN 回了什么头」都记下来。
+                        //   与其继续猜缺哪个头，不如让下一次日志直接给出答案。
+                        if (attempt == 1) {
+                            val sent = req.headers.names().sorted().joinToString(",")
+                            val got = listOf(
+                                "Server", "Via", "X-Cache", "X-Ali-Swift-Time", "Content-Type",
+                                "WWW-Authenticate", "X-Cs-Request-Id"
+                            ).mapNotNull { k -> r.header(k)?.let { "$k=$it" } }
+                                .joinToString(" ")
+                            val setCookieNames = (r.headers("Set-Cookie"))
+                                .map { it.substringBefore('=').trim() }
+                                .distinct().joinToString(",")
+                            com.fanxing.xbox.store.AppLog.i(
+                                "DL", "诊断 已发头={$sent}"
+                            )
+                            com.fanxing.xbox.store.AppLog.i(
+                                "DL", "诊断 CDN回头=[$got] Set-Cookie名=[$setCookieNames]"
+                            )
+                        }
                         val snippet = runCatching {
                             r.peekBody(900).string()
                         }.getOrDefault("")
