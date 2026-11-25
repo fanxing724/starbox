@@ -60,4 +60,32 @@ class LogCodecTest {
         assertNull(AppLog.testParse("no timestamp here"))
         assertNotNull(AppLog.testParse("11-25 16:22:01.000 I/X: hi"))
     }
+
+    @Test
+    fun decode_acceptsEpochMillisFormat() {
+        // 回归：0.9.25 曾把时间写成 13 位毫秒，而解析只认格式化日期，
+        // 导致「文件有内容却还原 0 条」，日志页看起来像被清空。
+        val line = "1763817705453 I/Quark: 快传令牌已取，走快传线路"
+        val out = AppLog.testDecode(listOf(line))
+        assertEquals(1, out.size)
+        assertEquals("Quark", out[0].tag)
+        assertEquals(com.fanxing.xbox.store.AppLog.Level.I, out[0].level)
+        assertEquals(1763817705453L, out[0].time)
+    }
+
+    @Test
+    fun encodeThenDecode_roundTrips() {
+        // 自己写的必须自己读得回来：格式改了就要两端一起改
+        val src = com.fanxing.xbox.store.AppLog.testEncode(
+            com.fanxing.xbox.store.AppLog.Entry(
+                1763817705453L,
+                com.fanxing.xbox.store.AppLog.Level.W, "DL", "分片 3 HTTP 412"
+            )
+        )
+        val out = AppLog.testDecode(listOf(src))
+        assertEquals(1, out.size)
+        assertEquals("DL", out[0].tag)
+        assertEquals(com.fanxing.xbox.store.AppLog.Level.W, out[0].level)
+        assertEquals("分片 3 HTTP 412", out[0].msg)
+    }
 }

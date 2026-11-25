@@ -48,10 +48,17 @@ object AppLog {
         val size = runCatching { if (f.exists()) f.length() else 0L }.getOrDefault(0L)
         if (size <= 0L) return
         val lines = runCatching { f.readLines() }.getOrNull() ?: return
-        val restored = runCatching { LogCodec.decode(lines) }.getOrElse {
+        val base = System.currentTimeMillis()
+        var restored = runCatching { LogCodec.decode(lines) }.getOrElse {
             // 解析失败也不能崩：退化为原样文本，至少内容还在
             add(Level.W, "AppLog", "上次日志解析失败(${it.message})，改为原文展示")
             lines.map { AppLog.Entry(System.currentTimeMillis(), Level.D, "Raw", it.take(500)) }
+        }
+        // 解不出任何条目但原文有内容 = 格式不认识，同样退化，绝不静默清空
+        if (restored.isEmpty() && lines.any { it.isNotBlank() }) {
+            add(Level.W, "AppLog", "上次日志格式无法识别（${lines.size} 行），按原文展示")
+            restored = lines.filter { it.isNotBlank() }
+                .mapIndexed { i, l -> AppLog.Entry(base + i, Level.D, "Raw", l.take(500)) }
         }
         synchronized(lock) {
             buf.clear()
@@ -115,6 +122,7 @@ object AppLog {
     /** 供单测直接调用纯解析逻辑 */
     internal fun testDecode(lines: List<String>) = LogCodec.decode(lines)
     internal fun testParse(line: String) = LogCodec.parse(line, 0L)
+    internal fun testEncode(e: Entry) = LogCodec.encode(e)
 
     /** 渲染用全文。超过上限时保留「头尾」，中间省略，避免超大字符串压垮界面 */
     const val RENDER_LIMIT = 60_000
@@ -158,18 +166,27 @@ object AppLog {
 internal object LogCodec {
 
     private val lineRegex =
-        Regex("^(\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}) ([DIWE])/([^:]{1,32}): (.*)$", RegexOption.DOT_MATCHES_ALL)
+        Regex(
+            "^((\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3})|(\\d{13})) ([DIWE])/([^:]{1,32}): (.*)$",
+            RegexOption.DOT_MATCHES_ALL
+        )
+
+    // 必须与 lineRegex 一致：写毫秒会导致自己读不回来（已踩过）
+    private val timeFmt = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.US)
 
     fun encode(e: AppLog.Entry): String =
-        "${e.time} ${e.level.name}/${e.tag}: ${e.msg}"
+        "${timeFmt.format(java.util.Date(e.time))} ${e.level.name}/${e.tag}: ${e.msg}"
 
     /** 解析一行；不是标准格式则返回 null（视为上一条的续行，比如堆栈） */
     fun parse(line: String, base: Long): Pair<AppLog.Entry, String>? {
         val m = lineRegex.find(line) ?: return null
-        val lvl = runCatching { AppLog.Level.valueOf(m.groupValues[2]) }.getOrNull() ?: return null
-        val tag = m.groupValues[3].take(32)
-        val msg = m.groupValues[4]
-        return AppLog.Entry(base, lvl, tag, msg) to msg
+        // 组：1=整段时间 2=日期分支 3=毫秒分支 4=级别 5=标签 6=内容
+        val lvl = runCatching { AppLog.Level.valueOf(m.groupValues[4]) }.getOrNull() ?: return null
+        val tag = m.groupValues[5].take(32)
+        val msg = m.groupValues[6]
+        // 毫秒分支非空就用它精确还原时间，否则用调用方给的基准
+        val ts = m.groupValues[3].toLongOrNull() ?: base
+        return AppLog.Entry(ts, lvl, tag, msg) to msg
     }
 
     /**
