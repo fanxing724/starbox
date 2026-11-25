@@ -42,11 +42,17 @@ object AppLog {
      * 关键场景：应用闪退后来不及复制日志，重启后必须还能看到现场。
      */
     private fun loadFromDisk() {
+        // ★ 日志模块绝不能成为崩溃源：本方法在 App.onCreate 里执行，
+        //   一旦抛异常会导致「每次启动都崩」，反而丢掉全部现场。
         val f = logFile ?: return
-        if (!f.exists() || f.length() == 0L) return
-        val size = f.length()
+        val size = runCatching { if (f.exists()) f.length() else 0L }.getOrDefault(0L)
+        if (size <= 0L) return
         val lines = runCatching { f.readLines() }.getOrNull() ?: return
-        val restored = LogCodec.decode(lines)
+        val restored = runCatching { LogCodec.decode(lines) }.getOrElse {
+            // 解析失败也不能崩：退化为原样文本，至少内容还在
+            add(Level.W, "AppLog", "上次日志解析失败(${it.message})，改为原文展示")
+            lines.map { AppLog.Entry(System.currentTimeMillis(), Level.D, "Raw", it.take(500)) }
+        }
         synchronized(lock) {
             buf.clear()
             buf.addAll(restored)
@@ -110,8 +116,17 @@ object AppLog {
     internal fun testDecode(lines: List<String>) = LogCodec.decode(lines)
     internal fun testParse(line: String) = LogCodec.parse(line, 0L)
 
-    fun text(): String = entries().joinToString("\n") {
-        "${fmt.format(Date(it.time))} ${it.level.name}/${it.tag}: ${it.msg}"
+    /** 渲染用全文。超过上限时保留「头尾」，中间省略，避免超大字符串压垮界面 */
+    const val RENDER_LIMIT = 60_000
+
+    fun text(): String {
+        val full = entries().joinToString("\n") {
+            "${fmt.format(Date(it.time))} ${it.level.name}/${it.tag}: ${it.msg}"
+        }
+        if (full.length <= RENDER_LIMIT) return full
+        val head = full.take(RENDER_LIMIT * 2 / 3)
+        val tail = full.takeLast(RENDER_LIMIT / 3)
+        return head + "\n……（中间省略 ${full.length - RENDER_LIMIT} 字符，请用「导出」取完整内容）\n" + tail
     }
 
     fun clear() {

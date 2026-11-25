@@ -43,8 +43,10 @@ class LogsActivity : AppCompatActivity() {
     }
 
     private fun render() {
-        val list = AppLog.entries()
-        b.content.text = if (list.isEmpty()) "（暂无日志）" else AppLog.text()
+        // 渲染失败不能把整个页面带崩，否则恰好丢掉要看的现场
+        runCatching {
+            val list = AppLog.entries()
+            b.content.text = if (list.isEmpty()) "（暂无日志）" else AppLog.text()
         // 崩后重开时明确告知：这里含上一次运行/崩溃的现场
         b.hint.text = when {
             AppLog.hasPreviousLog ->
@@ -52,7 +54,11 @@ class LogsActivity : AppCompatActivity() {
             else -> "日志已脱敏：不含 Cookie / Token / 签名参数，可放心分享。"
         }
         b.toolbar.subtitle = "${list.size} 条"
-        b.scroll.post { b.scroll.fullScroll(android.view.View.FOCUS_DOWN) }
+            b.scroll.post { b.scroll.fullScroll(android.view.View.FOCUS_DOWN) }
+        }.onFailure {
+            com.fanxing.xbox.store.AppLog.e("Logs", "渲染日志失败：${it.message}")
+            runCatching { b.content.text = "（渲染失败，请点「导出」取完整文件）" }
+        }
     }
 
     /** 导出到系统 Download，方便用文件管理器发给别人 */

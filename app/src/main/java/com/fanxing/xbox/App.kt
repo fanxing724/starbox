@@ -19,6 +19,21 @@ class App : Application() {
                 )
                 // 崩溃专档：即使主日志随后被清空或轮转，这份仍在
                 com.fanxing.xbox.store.AppLog.dumpCrash(this@App, st)
+                // 再往公共 Download 导一份：应用私有目录若也出问题，这份依然拿得到
+                runCatching {
+                    val body = com.fanxing.xbox.store.AppLog.text()
+                    val target = com.fanxing.xbox.store.Storage.create(
+                        this@App, "starbox-crash-${System.currentTimeMillis()}.txt"
+                    )
+                    if (target.uri != null) {
+                        contentResolver.openOutputStream(target.uri)?.use {
+                            it.write(body.toByteArray())
+                        }
+                    } else {
+                        target.file?.writeText(body)
+                    }
+                    com.fanxing.xbox.store.Storage.finish(this@App, target)
+                }
             }
             // 仍然交给系统处理，保持原有崩溃行为
             prev?.uncaughtException(t, e)
