@@ -44,15 +44,21 @@ object AppLog {
     private fun loadFromDisk() {
         val f = logFile ?: return
         if (!f.exists() || f.length() == 0L) return
+        val size = f.length()
         val lines = runCatching { f.readLines() }.getOrNull() ?: return
-        if (lines.isEmpty()) return
         val restored = LogCodec.decode(lines)
         synchronized(lock) {
             buf.clear()
             buf.addAll(restored)
             while (buf.size > MAX_MEM) buf.removeFirst()
         }
-        hasPreviousLog = true
+        // 自证：文件多大、还原出多少条。下次再出现「只有一条分隔线」就能立刻判断原因
+        add(
+            Level.I, "AppLog",
+            "读取上次日志：文件=${size}B 行数=${lines.size} 还原=${restored.size}条 " +
+                "本次路径=${f.absolutePath}"
+        )
+        if (restored.isNotEmpty()) hasPreviousLog = true
         // 打一条分隔，明确区分两次运行，避免排查时把旧记录当成新的
         add(Level.D, "AppLog", "—— 以上为上一次运行的日志 ——")
     }
@@ -113,6 +119,17 @@ object AppLog {
             buf.clear()
             runCatching { logFile?.writeText("") }
             runCatching { File(logFile?.parentFile, "starbox.log.1").delete() }
+        }
+    }
+
+    /** 崩溃现场另存一份，主日志轮转/清空都不影响 */
+    fun dumpCrash(ctx: Context, stack: String) {
+        runCatching {
+            val dir = File(ctx.applicationContext.filesDir, "logs")
+            dir.mkdirs()
+            File(dir, "crash.log").appendText(
+                "===== ${fmt.format(Date())} =====\n$stack\n"
+            )
         }
     }
 

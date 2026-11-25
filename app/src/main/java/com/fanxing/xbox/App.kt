@@ -13,11 +13,12 @@ class App : Application() {
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             runCatching {
                 com.fanxing.xbox.store.AppLog.init(this@App)
+                val st = android.util.Log.getStackTraceString(e)
                 com.fanxing.xbox.store.AppLog.e(
-                    "Crash",
-                    "未捕获异常线程=${t.name} 类型=${e.javaClass.name}: ${e.message}\n" +
-                        android.util.Log.getStackTraceString(e)
+                    "Crash", "未捕获异常线程=${t.name} 类型=${e.javaClass.name}: ${e.message}\n$st"
                 )
+                // 崩溃专档：即使主日志随后被清空或轮转，这份仍在
+                com.fanxing.xbox.store.AppLog.dumpCrash(this@App, st)
             }
             // 仍然交给系统处理，保持原有崩溃行为
             prev?.uncaughtException(t, e)
