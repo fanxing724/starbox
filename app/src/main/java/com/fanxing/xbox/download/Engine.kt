@@ -26,7 +26,14 @@ import kotlinx.coroutines.runBlocking
 
 enum class State { QUEUED, RUNNING, PAUSED, DONE, ERROR }
 
-class Chunk(val index: Int, val start: Long, val end: Long, @Volatile var done: Long = 0) {
+class Chunk(
+    val index: Int,
+    val start: Long,
+    val end: Long,
+    @Volatile var done: Long = 0,
+    /** 当前用第几条源；4xx 被拒时顺延到下一条（主链/镜像/备用线路） */
+    @Volatile var srcIdx: Int = 0
+) {
     val length: Long get() = end - start + 1
     val finished: Boolean get() = done >= length
 }
@@ -360,8 +367,8 @@ object Engine {
     }
 
     /** 有镜像就把连接摊到多个节点上 */
-    private fun sourceFor(t: Task, chunkIndex: Int): String =
-        t.sources[chunkIndex % t.sources.size]
+    private fun sourceFor(t: Task, c: Chunk): String =
+        t.sources[c.srcIdx % t.sources.size]
 
     private fun probeSize(t: Task): Long {
         val req = Request.Builder().url(t.sources[0])
@@ -398,11 +405,12 @@ object Engine {
         while (!c.finished && !t.cancelFlag.get() && attempt < 6) {
             try {
                 val from = c.start + c.done
-                val req = Request.Builder().url(sourceFor(t, c.index))
+                val req = Request.Builder().url(sourceFor(t, c))
                     .header("Range", "bytes=$from-${c.end}")
                     .apply { t.headers.forEach { (k, v) -> header(k, v) } }
                     .get().build()
 
+                var switched = false
                 Http.dl.newCall(req).execute().use { r ->
                     if (r.code == 200) {
                         // 服务器忽略了 Range，回的是「整个文件」。
@@ -411,11 +419,22 @@ object Engine {
                             throw DriveErr("服务器不支持 Range（HTTP 200），无法分片下载")
                         }
                     } else if (r.code != 206) {
+                        // 4xx 多为「这条链被拒/已失效」。若还有别的源（备用线路），
+                        // 先换一条重试，而不是拿死链重复撞。（判断放在 lambda 外，
+                        // 否则 continue 在 inline lambda 里属于实验特性）
+                        if (r.code in 401..499 && c.srcIdx + 1 < t.sources.size) {
+                            c.srcIdx++
+                            com.fanxing.xbox.store.AppLog.i(
+                                "DL", "片${c.index} HTTP ${r.code}，切换到第 ${c.srcIdx + 1}/${t.sources.size} 条源"
+                            )
+                            switched = true
+                            return@use   // 不在 inline lambda 里 continue（属实验特性），改由外层处理
+                        }
                         val snippet = runCatching {
                             r.peekBody(200).string()
                         }.getOrDefault("")
                         com.fanxing.xbox.store.AppLog.e(
-                            "DL", "片${c.index} HTTP ${r.code} 响应=${snippet.ifBlank { "(空)" }}"
+                            "DL", "片${c.index} HTTP ${r.code} 源=${c.srcIdx + 1}/${t.sources.size} 响应=${snippet.ifBlank { "(空)" }}"
                         )
                         throw DriveErr("分片 ${c.index} HTTP ${r.code}")
                     } else {
@@ -446,6 +465,7 @@ object Engine {
                         }
                     }
                 }
+                if (switched) continue   // 已切到下一条源，重新请求
                 if (c.finished) return
                 // 连接被提前关闭但没下完 —— 继续续传
                 attempt++

@@ -397,17 +397,30 @@ class QuarkDrive : Drive {
             // 快传线路：官方第二下载通道
             body.put("speedup_session", "").put("token", tk)
         }
+        // 先取快传线路，再取普通线路作备用；主链被拒时引擎可切换
+        val normalBody = JSONObject().put("fids", JSONArray().put(file.id))
         var j = authPost(
             "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
             body
         )
+        var altUrl = ""
+        val primaryUrl = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
+        if (j.optInt("code") == 0) {
+            val alt = runCatching {
+                authPost(
+                    "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
+                    normalBody
+                ).optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
+            }.getOrDefault("")
+            if (alt.isNotBlank() && alt != primaryUrl) altUrl = alt
+        }
         // 快传失败则退回普通线路，不能因为加速通道不可用就下不了
         if (j.optInt("code") != 0 && tk.isNotBlank()) {
             com.fanxing.xbox.store.AppLog.w("Quark", "快传线路取链失败，回退普通线路")
             socialToken = ""; socialExpire = 0
             j = authPost(
                 "$api/1/clouddrive/file/download?pr=ucpro&fr=pc&sys=win32&ve=6.9.7.761",
-                JSONObject().put("fids", JSONArray().put(file.id))
+                normalBody
             )
         }
         val url = j.optJSONArray("data")?.optJSONObject(0)?.optString("download_url") ?: ""
@@ -428,7 +441,8 @@ class QuarkDrive : Drive {
                 "User-Agent" to uaPcNew,
                 "Referer" to "https://pan.quark.cn/",
                 "Cookie" to ck
-            )
+            ),
+            alternates = if (altUrl.isNotBlank()) listOf(altUrl) else emptyList()
         )
     }
 }

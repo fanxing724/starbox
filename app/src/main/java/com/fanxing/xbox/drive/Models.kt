@@ -26,7 +26,10 @@ data class RemoteFile(
 data class DirectLink(
     val url: String,
     val headers: Map<String, String> = emptyMap(),
-    val mirrors: List<String> = emptyList()
+    /** 同 host 的 CDN 镜像节点 */
+    val mirrors: List<String> = emptyList(),
+    /** 整条不同的备用直链（如夸克快传 vs 普通线路）——主链被拒时可切换 */
+    val alternates: List<String> = emptyList()
 )
 
 /** 网盘驱动统一接口 */

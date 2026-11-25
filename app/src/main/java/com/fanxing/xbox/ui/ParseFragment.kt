@@ -214,9 +214,12 @@ class ParseFragment : Fragment() {
                     com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链 ${f.name} size=${f.size} personal=${f.meta["personal"] ?: "0"}")
                     val link = withContext(Dispatchers.IO) { d.link(sh, f) }
                     com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链成功 节点数=${if (CredsHolder.useMirror) link.mirrors.size + 1 else 1}")
-                    val sources =
-                        if (CredsHolder.useMirror) expandMirrors(link.url, link.mirrors)
-                        else listOf(link.url)
+                    // 主链 + CDN 镜像 + 备用整链（夸克快传/普通两条线路）
+                    val sources = buildList {
+                        add(link.url)
+                        if (CredsHolder.useMirror) addAll(expandMirrors(link.url, link.mirrors).drop(1))
+                        addAll(link.alternates)
+                    }
                     // 落盘到系统公共 Download 目录
                     val target = withContext(Dispatchers.IO) {
                         Storage.create(requireContext(), f.name.ifBlank { "file_${f.id}" })
