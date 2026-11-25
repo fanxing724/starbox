@@ -354,16 +354,19 @@ object Engine {
                     break
                 }
 
-                // 全部未下且都是 4xx：换单连接直下（不带 Range 由 fetchChunk 内部处理）
+                // 4xx 是服务端明确拒绝，不是网络抖动：
+                // 再打一轮只会加重风控。直接失败并给出可执行建议。
                 if (pass == 1 && t.chunks.isNotEmpty() &&
                     t.chunks.none { it.finished } && t.lastHttp in 400..499
                 ) {
                     com.fanxing.xbox.store.AppLog.w(
-                        "DL", "全部分片被 HTTP ${t.lastHttp} 拒绝，降级为单连接直下重试一次"
+                        "DL", "全部分片被 HTTP ${t.lastHttp} 拒绝，停止继续请求以免触发风控"
                     )
-                    t.chunks.clear()
-                    t.chunks.add(Chunk(0, 0, t.size - 1))
-                    continue
+                    t.state = State.ERROR
+                    t.error = "直链被 CDN 拒绝（HTTP ${t.lastHttp}）。" +
+                        "这通常不是网络问题，而是链接失效或触发了服务端限流；" +
+                        "建议：① 稍后再试 ② 重新解析下载拿到新链接 ③ 仍不行则改用官方客户端"
+                    break
                 }
 
                 t.state = State.ERROR
@@ -445,7 +448,8 @@ object Engine {
         var attempt = 0
         var lastErr = ""
         var lastCode = 0
-        while (!c.finished && !t.cancelFlag.get() && attempt < 6) {
+        // 最多 2 次：同一个 URL 连撞多次只会加重服务端风控，没有意义
+        while (!c.finished && !t.cancelFlag.get() && attempt < 2) {
             try {
                 val from = c.start + c.done
                 val req = Request.Builder().url(sourceFor(t, c))
@@ -543,7 +547,10 @@ object Engine {
                 if (attempt == 1) {
                     com.fanxing.xbox.store.AppLog.w("DL", "分片 ${c.index} 首次失败：${e.message}")
                 }
-                delay(800L * attempt)
+                val backoff = if (attempt <= 1) 3_000L else 8_000L
+                val jitter = (Math.random() * 1500).toLong()
+                com.fanxing.xbox.store.AppLog.d("DL", "片${c.index} 第 $attempt 次失败，退避 ${backoff / 1000}s 后重试")
+                delay(backoff + jitter)
             }
         }
         if (!c.finished && !t.cancelFlag.get()) {
