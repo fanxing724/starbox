@@ -26,10 +26,35 @@ object AppLog {
 
     @Volatile private var logFile: File? = null
 
+    /** 本次启动前，磁盘上已有一份日志（含上一次运行 / 上一次崩溃） */
+    @Volatile var hasPreviousLog: Boolean = false
+        private set
+
     fun init(ctx: Context) {
         val dir = File(ctx.applicationContext.filesDir, "logs")
         dir.mkdirs()
         logFile = File(dir, "starbox.log")
+        loadFromDisk()
+    }
+
+    /**
+     * 把上一次运行的日志读回内存。
+     * 关键场景：应用闪退后来不及复制日志，重启后必须还能看到现场。
+     */
+    private fun loadFromDisk() {
+        val f = logFile ?: return
+        if (!f.exists() || f.length() == 0L) return
+        val lines = runCatching { f.readLines() }.getOrNull() ?: return
+        if (lines.isEmpty()) return
+        val restored = LogCodec.decode(lines)
+        synchronized(lock) {
+            buf.clear()
+            buf.addAll(restored)
+            while (buf.size > MAX_MEM) buf.removeFirst()
+        }
+        hasPreviousLog = true
+        // 打一条分隔，明确区分两次运行，避免排查时把旧记录当成新的
+        add(Level.D, "AppLog", "—— 以上为上一次运行的日志 ——")
     }
 
     /** 脱敏：Cookie/Token/签名参数一律打码，避免日志泄露凭据 */
@@ -59,7 +84,7 @@ object AppLog {
                     val old = File(f.parentFile, "starbox.log.1")
                     old.delete(); f.renameTo(old)
                 }
-                f.appendText("${fmt.format(Date(e.time))} ${e.level.name}/$tag: ${e.msg}\n")
+                f.appendText(LogCodec.encode(e) + "\n")
             }
         }
     }
@@ -75,6 +100,10 @@ object AppLog {
 
     fun entries(): List<Entry> = synchronized(lock) { buf.toList() }
 
+    /** 供单测直接调用纯解析逻辑 */
+    internal fun testDecode(lines: List<String>) = LogCodec.decode(lines)
+    internal fun testParse(line: String) = LogCodec.parse(line, 0L)
+
     fun text(): String = entries().joinToString("\n") {
         "${fmt.format(Date(it.time))} ${it.level.name}/${it.tag}: ${it.msg}"
     }
@@ -88,4 +117,51 @@ object AppLog {
     }
 
     fun file(): File? = logFile
+}
+
+/**
+ * 日志文件的读写编解码。抽出来是为了能单测：
+ * 崩后重开必须能把上一次运行的内容完整还原。
+ */
+internal object LogCodec {
+
+    private val lineRegex =
+        Regex("^(\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}) ([DIWE])/([^:]{1,32}): (.*)$", RegexOption.DOT_MATCHES_ALL)
+
+    fun encode(e: AppLog.Entry): String =
+        "${e.time} ${e.level.name}/${e.tag}: ${e.msg}"
+
+    /** 解析一行；不是标准格式则返回 null（视为上一条的续行，比如堆栈） */
+    fun parse(line: String, base: Long): Pair<AppLog.Entry, String>? {
+        val m = lineRegex.find(line) ?: return null
+        val lvl = runCatching { AppLog.Level.valueOf(m.groupValues[2]) }.getOrNull() ?: return null
+        val tag = m.groupValues[3].take(32)
+        val msg = m.groupValues[4]
+        return AppLog.Entry(base, lvl, tag, msg) to msg
+    }
+
+    /**
+     * 把整份文件还原成条目列表：
+     * 标准行直接成条；非标准行（堆栈续行、异常换行）并入上一条。
+     */
+    fun decode(lines: List<String>): List<AppLog.Entry> {
+        val out = ArrayList<AppLog.Entry>()
+        var base = System.currentTimeMillis()
+        for (raw in lines) {
+            val line = raw.trimEnd('\n', '\r')
+            if (line.isBlank()) continue
+            val parsed = parse(line, base)
+            if (parsed == null) {
+                if (out.isNotEmpty()) {
+                    val last = out.removeAt(out.size - 1)
+                    out.add(last.copy(msg = last.msg + "\n" + line))
+                }
+                continue
+            }
+            val (entry, _) = parsed
+            out.add(entry)
+            base += 1   // 同一毫秒的多条按顺序递增，保证「最新在末尾」
+        }
+        return out
+    }
 }

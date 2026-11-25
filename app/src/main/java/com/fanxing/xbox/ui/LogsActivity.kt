@@ -45,6 +45,12 @@ class LogsActivity : AppCompatActivity() {
     private fun render() {
         val list = AppLog.entries()
         b.content.text = if (list.isEmpty()) "（暂无日志）" else AppLog.text()
+        // 崩后重开时明确告知：这里含上一次运行/崩溃的现场
+        b.hint.text = when {
+            AppLog.hasPreviousLog ->
+                "⚠ 本列表已包含上一次运行的日志（含崩溃现场），未复制前请勿清空。"
+            else -> "日志已脱敏：不含 Cookie / Token / 签名参数，可放心分享。"
+        }
         b.toolbar.subtitle = "${list.size} 条"
         b.scroll.post { b.scroll.fullScroll(android.view.View.FOCUS_DOWN) }
     }
