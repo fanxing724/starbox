@@ -301,7 +301,19 @@ object Engine {
                 pass++
                 t.failCount = 0
                 val jobs = t.chunks.filter { !it.finished }.map { c ->
-                    scope.launch { fetchChunk(t, c, sink) }
+                    scope.launch {
+                        // ★ 必须就地接住：作用域是 SupervisorJob，子协程失败不会取消兄弟，
+                        //   而是直接交给默认未捕获处理器 —— 一个分片失败就会让整个 App 闪退。
+                        try {
+                            fetchChunk(t, c, sink)
+                        } catch (ce: Throwable) {
+                            if (t.cancelFlag.get()) return@launch   // 用户主动暂停，不算错误
+                            t.failCount++
+                            com.fanxing.xbox.store.AppLog.e(
+                                "DL", "片${c.index} 协程终止：${ce.javaClass.simpleName}: ${ce.message}"
+                            )
+                        }
+                    }
                 }
                 com.fanxing.xbox.store.AppLog.i(
                     "DL", "第 $pass 轮：派发 ${jobs.size} 个分片协程（共 ${t.chunks.size} 片）"
@@ -516,7 +528,6 @@ object Engine {
             }
         }
         if (!c.finished && !t.cancelFlag.get()) {
-            t.failCount++
             if (lastCode != 0) t.lastHttp = lastCode
             com.fanxing.xbox.store.AppLog.e(
                 "DL", "分片 ${c.index} 重试 $attempt 次后仍失败：${lastErr}"
