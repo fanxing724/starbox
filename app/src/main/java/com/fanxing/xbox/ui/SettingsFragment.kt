@@ -75,6 +75,8 @@ class SettingsFragment : Fragment() {
         row("存储占用", storageSummary(), "") { clearCacheDialog() }
 
         section("排查")
+        row("复制网盘凭据（调试用）", "排查直链被拒时，把 Cookie 交给作者在本机复现",
+            "点我复制") { copyCredsDialog() }
         row("运行日志", "记录解析/转存/取链/下载各步与错误码，已脱敏", "${com.fanxing.xbox.store.AppLog.entries().size} 条") {
             startActivity(Intent(requireContext(), LogsActivity::class.java))
         }
@@ -85,7 +87,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.35 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.36 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {
@@ -232,6 +234,48 @@ class SettingsFragment : Fragment() {
                 val freed = com.fanxing.xbox.store.DiskUsage.clearCache(requireContext())
                 toast("已释放 ${com.fanxing.xbox.store.DiskUsage.fmt(freed)}")
                 build()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+
+    /**
+     * 调试用：把某个网盘的登录 Cookie 复制到剪贴板。
+     * 目的：作者在自己的环境里重放同一条请求，快速定位「缺哪个头」，
+     * 而不是靠真机一轮轮试。
+     * ⚠️ 凭据等同于账号访问权，只应发给信任的人；发完可在该网盘改密或重新登录使其失效。
+     */
+    private fun copyCredsDialog() {
+        val creds = Creds.get(requireContext())
+        val items = Registry.all.filter { it.loginUrl != null }.map { d ->
+            val ck = creds.cookie(d.id)
+            d.name + if (ck.isBlank()) "（未登录）" else "（已登录 ${ck.length} 字符）"
+        }
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("复制哪个网盘的凭据？")
+            .setItems(items.toTypedArray()) { _, which ->
+                val d = Registry.all.filter { it.loginUrl != null }[which]
+                val ck = creds.cookie(d.id)
+                if (ck.isBlank()) { toast("${d.name} 未登录"); return@setItems }
+                androidx.appcompat.app.AlertDialog.Builder(requireContext())
+                    .setTitle("确认导出 ${d.name} 凭据？")
+                    .setMessage(
+                        "将复制该网盘的完整 Cookie 到剪贴板。\n\n" +
+                            "· Cookie 等同账号访问权，不要发到公开场合\n" +
+                            "· 只发给信任的人；用完建议改密或重新登录使其失效"
+                    )
+                    .setPositiveButton("复制") { _, _ ->
+                        val cm = requireContext()
+                            .getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                        cm.setPrimaryClip(
+                            android.content.ClipData.newPlainText("cookie", ck)
+                        )
+                        toast("已复制 ${d.name} Cookie，可粘贴给作者")
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
             }
             .setNegativeButton("取消", null)
             .show()
