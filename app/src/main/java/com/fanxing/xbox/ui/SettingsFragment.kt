@@ -71,6 +71,9 @@ class SettingsFragment : Fragment() {
             DrivesDialog.show(requireActivity())
         }
 
+        section("存储")
+        row("存储占用", storageSummary(), "") { clearCacheDialog() }
+
         section("排查")
         row("运行日志", "记录解析/转存/取链/下载各步与错误码，已脱敏", "${com.fanxing.xbox.store.AppLog.entries().size} 条") {
             startActivity(Intent(requireContext(), LogsActivity::class.java))
@@ -82,7 +85,7 @@ class SettingsFragment : Fragment() {
         row("免责声明", "内容来源与版权责任", "") { openLegal("disclaimer") }
         row("开源组件与许可", "AGPL-3.0 · 运行库 Apache 2.0 · 无 native 库", "") { showLicenses() }
         row("获取源代码", "AGPL-3.0 要求向使用者提供对应源码", "GitHub") { showSource() }
-        row("starbox", "版本 0.9.32 · 14 家网盘 · AGPL-3.0", "") {}
+        row("starbox", "版本 0.9.33 · 14 家网盘 · AGPL-3.0", "") {}
     }
 
     private fun openLegal(kind: String) {
@@ -208,6 +211,30 @@ class SettingsFragment : Fragment() {
             box.addView(row)
         }
         dialog.show()
+    }
+
+
+    private fun storageSummary(): String {
+        val d = com.fanxing.xbox.store.DiskUsage.breakdown(requireContext())
+        val parts = d.filter { it.value > 0 }.map { "${it.key} ${com.fanxing.xbox.store.DiskUsage.fmt(it.value)}" }
+        return if (parts.isEmpty()) "0B" else parts.joinToString(" · ")
+    }
+
+    private fun clearCacheDialog() {
+        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+            .setTitle("清理缓存")
+            .setMessage(
+                "清的是缓存、WebView 数据与代码缓存；\n" +
+                    "下载文件（Download/starbox）、登录状态、解析历史、断点记录都不会动。\n\n" +
+                    "当前占用：${storageSummary()}"
+            )
+            .setPositiveButton("清理") { _, _ ->
+                val freed = com.fanxing.xbox.store.DiskUsage.clearCache(requireContext())
+                toast("已释放 ${com.fanxing.xbox.store.DiskUsage.fmt(freed)}")
+                build()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showSource() {

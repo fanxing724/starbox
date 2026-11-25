@@ -19,6 +19,16 @@ import java.io.File
  */
 object Storage {
 
+    /** 所有产物统一收拢在这里，便于用户在文件管理器里找 */
+    const val ROOT_DIR = "starbox"
+    /** 日志子目录 */
+    const val LOG_DIR = "log"
+
+    private fun rootRel(): String =
+        Environment.DIRECTORY_DOWNLOADS + "/" + ROOT_DIR
+
+    private fun logRel(): String = "${rootRel()}/$LOG_DIR"
+
     /** 一个下载目标：uri 非空走 MediaStore，否则走 file */
     data class Target(
         val uri: Uri?,
@@ -28,8 +38,11 @@ object Storage {
     )
 
     fun publicDirLabel(): String =
-        if (Build.VERSION.SDK_INT >= 29) "内部存储/Download"
-        else Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
+        if (Build.VERSION.SDK_INT >= 29) "内部存储/Download/$ROOT_DIR"
+        else Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            .absolutePath + "/" + ROOT_DIR
+
+    fun logDirLabel(): String = publicDirLabel() + "/" + LOG_DIR
 
     private fun mimeOf(name: String): String {
         val e = name.substringAfterLast('.', "").lowercase()
@@ -48,70 +61,83 @@ object Storage {
     }
 
     /** 重名时自动加序号，避免覆盖已有文件 */
-    private fun uniqueName(ctx: Context, name: String): String {
+    private fun uniqueName(ctx: Context, name: String, relPath: String): String {
+        val stem = name.substringBeforeLast('.', name)
+        val ext = name.substringAfterLast('.', "")
+        fun withIndex(i: Int) = if (ext.isEmpty()) "$stem($i)" else "$stem($i).$ext"
+
         if (Build.VERSION.SDK_INT >= 29) {
             val res = ctx.contentResolver
             var candidate = name
             var n = 1
-            val base = name.substringBeforeLast('.', name)
-            val ext = name.substringAfterLast('.', "")
-            while (existsInDownloads(res, candidate)) {
-                candidate = if (ext.isEmpty()) "$base($n)" else "$base($n).$ext"
-                n++
+            while (existsInDownloads(res, candidate, relPath)) {
+                candidate = withIndex(n); n++
                 if (n > 999) break
             }
             return candidate
         }
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        dir.mkdirs()
-        var f = File(dir, name)
+
+        // 旧系统走 File：父目录按 relPath 拆出来再 mkdirs
+        val parent = File(
+            Environment.getExternalStoragePublicDirectory(relPath.substringBeforeLast('/')),
+            relPath.substringAfterLast('/')
+        )
+        parent.mkdirs()
+        var f = File(parent, name)
         var n = 1
-        val base = name.substringBeforeLast('.', name)
-        val ext = name.substringAfterLast('.', "")
         while (f.exists()) {
-            val nn = if (ext.isEmpty()) "$base($n)" else "$base($n).$ext"
-            f = File(dir, nn); n++
+            f = File(parent, withIndex(n)); n++
             if (n > 999) break
         }
         return f.name
     }
 
-    private fun existsInDownloads(res: android.content.ContentResolver, name: String): Boolean =
+    private fun existsInDownloads(
+        res: android.content.ContentResolver, name: String, relPath: String
+    ): Boolean =
         runCatching {
             res.query(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                 arrayOf(MediaStore.Downloads._ID),
                 "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
-                arrayOf(name, Environment.DIRECTORY_DOWNLOADS + "/"),
+                arrayOf(name, "$relPath/"),
                 null
             )?.use { it.moveToFirst() } ?: false
         }.getOrDefault(false)
 
-    fun create(ctx: Context, rawName: String): Target {
+    fun create(ctx: Context, rawName: String): Target = createIn(ctx, rootRel(), rawName)
+
+    /** 在指定相对目录下创建（如日志放 Download/starbox/log） */
+    fun createIn(ctx: Context, relPath: String, rawName: String): Target {
         val safe = rawName.ifBlank { "file" }.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-        val name = uniqueName(ctx, safe)
+        val name = uniqueName(ctx, safe, relPath)
 
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                 put(MediaStore.Downloads.MIME_TYPE, mimeOf(name))
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.RELATIVE_PATH, relPath)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val uri = ctx.contentResolver
                 .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("无法在 Download 目录创建文件")
-            return Target(uri, null, name, "Download/$name")
+            return Target(uri, null, name, "Download/${relPath.removeSuffix("/")}/$name")
         }
 
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        dir.mkdirs()
-        val f = File(dir, name)
+        val base = Environment.getExternalStoragePublicDirectory(relPath.substringBeforeLast('/'))
+        base.mkdirs()
+        val sub = File(base, relPath.substringAfterLast('/'))
+        sub.mkdirs()
+        val f = File(sub, name)
         if (!f.createNewFile() && !f.exists()) {
             throw IllegalStateException("无法写入 Download 目录，请检查存储权限")
         }
         return Target(null, f, name, f.absolutePath)
     }
+
+    /** 在 Download/starbox/log 下创建日志文件 */
+    fun createLog(ctx: Context, rawName: String): Target = createIn(ctx, logRel(), rawName)
 
     /** 下载完成后解除 pending，让文件管理器/其他应用可见。返回是否发布成功 */
     fun finish(ctx: Context, t: Target): Boolean {
@@ -134,5 +160,51 @@ object Storage {
         } else if (!path.isNullOrBlank()) {
             runCatching { File(path).delete() }
         }
+    }
+}
+
+/** 应用自身空间占用统计与清理（公共 Download 不计入，那是用户的文件） */
+object DiskUsage {
+
+    private fun sizeOf(f: File?): Long {
+        if (f == null || !f.exists()) return 0L
+        if (f.isFile) return f.length()
+        var total = 0L
+        f.listFiles()?.forEach { total += sizeOf(it) }
+        return total
+    }
+
+    /** 各目录占用字节 */
+    fun breakdown(ctx: Context): LinkedHashMap<String, Long> = linkedMapOf(
+        "缓存" to sizeOf(ctx.cacheDir),
+        "WebView数据" to sizeOf(File(ctx.dataDir, "app_webview")),
+        "用户数据" to sizeOf(ctx.filesDir),
+        "代码缓存" to sizeOf(ctx.codeCacheDir),
+        "外部缓存" to sizeOf(ctx.externalCacheDir)
+    )
+
+    fun total(ctx: Context): Long = breakdown(ctx).values.sum()
+
+    /**
+     * 只清缓存类目录，**不碰 Cookie 与站点数据**：
+     * - filesDir（日志、断点元数据）保留
+     * - app_webview 只删 Cache / Code Cache 子目录，Cookies 与 LocalStorage 必须留着，
+     *   否则清理缓存会把登录状态一起清掉，那是自找麻烦。
+     */
+    fun clearCache(ctx: Context): Long {
+        val before = total(ctx)
+        listOf(ctx.cacheDir, ctx.codeCacheDir, ctx.externalCacheDir)
+            .forEach { d -> d?.listFiles()?.forEach { it.deleteRecursively() } }
+        val wv = File(ctx.dataDir, "app_webview")
+        listOf("Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage")
+            .map { File(wv, it) }
+            .forEach { d -> if (d.exists()) d.listFiles()?.forEach { it.deleteRecursively() } }
+        return before - total(ctx)
+    }
+
+    fun fmt(bytes: Long): String = when {
+        bytes <= 0 -> "0B"
+        bytes < 1024 * 1024 -> "%.0fKB".format(bytes / 1024.0)
+        else -> "%.1fMB".format(bytes / (1024.0 * 1024))
     }
 }

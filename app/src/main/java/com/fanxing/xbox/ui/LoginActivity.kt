@@ -112,6 +112,12 @@ class LoginActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // WebView 会把重 SPA 的资源长期堆在 cacheDir（实测可达几十上百 MB），
+        // 关闭登录页时清掉；凭据在 CookieManager 里，不受影响。
+        runCatching {
+            b.web.clearCache(true)      // 只清 HTTP 缓存
+            b.web.clearFormData()       // 不动 Cookie / LocalStorage，登录态保住
+        }
         b.web.destroy()
         super.onDestroy()
     }

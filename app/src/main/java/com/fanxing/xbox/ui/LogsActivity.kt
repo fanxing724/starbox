@@ -88,7 +88,7 @@ class LogsActivity : AppCompatActivity() {
         b.hint.text = when {
             AppLog.hasPreviousLog ->
                 "⚠ 本列表已包含上一次运行的日志（含崩溃现场），未复制前请勿清空。"
-            else -> "日志已脱敏：不含 Cookie / Token / 签名参数，可放心分享。"
+            else -> "日志已脱敏：不含 Cookie / Token / 签名参数，可放心分享。\n导出位置：Download/starbox/log/"
         }
         b.toolbar.subtitle = "${list.size} 条"
             b.scroll.post { b.scroll.fullScroll(android.view.View.FOCUS_DOWN) }
@@ -103,14 +103,14 @@ class LogsActivity : AppCompatActivity() {
         val t = AppLog.text()
         if (t.isBlank()) { toast("暂无日志"); return }
         runCatching {
-            val target = Storage.create(this, "starbox-log-${System.currentTimeMillis()}.txt")
+            val target = Storage.createLog(this, "starbox-log-${System.currentTimeMillis()}.txt")
             if (target.uri != null) {
                 contentResolver.openOutputStream(target.uri)?.use { it.write(t.toByteArray()) }
             } else {
                 target.file?.writeText(t)
             }
             Storage.finish(this, target)
-            toast("已导出到 Download/${target.displayName}")
+            toast("已导出到 Download/starbox/log/${target.displayName}")
         }.onFailure { toast("导出失败：${it.message}") }
     }
 

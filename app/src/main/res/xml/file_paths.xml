@@ -2,6 +2,6 @@
 <paths>
     <external-files-path name="downloads" path="Download/" />
     <files-path name="internal" path="Download/" />
-    <!-- 只授权公共 Download，不开放整个外部存储根 -->
-    <external-path name="public_downloads" path="Download/" />
+    <!-- 只授权公共 Download/starbox，日志在其下的 log 子目录 -->
+    <external-path name="public_starbox" path="Download/starbox/" />
 </paths>

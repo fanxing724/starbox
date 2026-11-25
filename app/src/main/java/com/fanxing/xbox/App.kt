@@ -22,7 +22,7 @@ class App : Application() {
                 // 再往公共 Download 导一份：应用私有目录若也出问题，这份依然拿得到
                 runCatching {
                     val body = com.fanxing.xbox.store.AppLog.text()
-                    val target = com.fanxing.xbox.store.Storage.create(
+                    val target = com.fanxing.xbox.store.Storage.createLog(
                         this@App, "starbox-crash-${System.currentTimeMillis()}.txt"
                     )
                     if (target.uri != null) {
