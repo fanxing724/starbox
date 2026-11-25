@@ -60,6 +60,9 @@ class Task(
     internal val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     /** 旧执行是否还在跑（防止快速暂停/继续时两份执行写同一文件） */
     @Volatile internal var running: Boolean = false
+    /** 本轮最终失败的分片数与最后见到的 HTTP 码，用于判定是否整体被拒 */
+    @Volatile var failCount: Int = 0
+    @Volatile var lastHttp: Int = 0
     /** 旧执行未退出时收到的继续请求，等它退出后再入队 */
     @Volatile internal var resumeRequested: Boolean = false
 }
@@ -291,17 +294,26 @@ object Engine {
         }
 
         try {
-            // 5) 并发拉各分片
-            val jobs = t.chunks.filter { !it.finished }.map { c ->
-                scope.launch { fetchChunk(t, c, sink) }
-            }
-            com.fanxing.xbox.store.AppLog.i("DL", "已派发 ${jobs.size} 个分片协程")
-            jobs.forEach { it.join() }
-            com.fanxing.xbox.store.AppLog.i("DL", "分片协程全部返回 完成=${t.chunks.count { it.finished }}/${t.chunks.size}")
+            // 5) 并发拉各分片；若全部分片被同一类 4xx 拒绝，降级成单连接再试一次。
+            //    预签名直链被拒时，多线程只会把同一条死链撞更多次，没有意义。
+            var pass = 0
+            while (pass < 2) {
+                pass++
+                t.failCount = 0
+                val jobs = t.chunks.filter { !it.finished }.map { c ->
+                    scope.launch { fetchChunk(t, c, sink) }
+                }
+                com.fanxing.xbox.store.AppLog.i(
+                    "DL", "第 $pass 轮：派发 ${jobs.size} 个分片协程（共 ${t.chunks.size} 片）"
+                )
+                jobs.forEach { it.join() }
+                com.fanxing.xbox.store.AppLog.i(
+                    "DL", "第 $pass 轮结束 完成=${t.chunks.count { it.finished }}/${t.chunks.size} " +
+                        "失败片=${t.failCount} 末次HTTP=${t.lastHttp}"
+                )
 
-            if (t.cancelFlag.get()) {
-                t.state = State.PAUSED
-            } else if (t.chunks.all { it.finished }) {
+                if (t.cancelFlag.get()) { t.state = State.PAUSED; break }
+                if (t.chunks.all { it.finished }) {
                 // 完工校验：分片覆盖 + 实际落盘长度都必须等于文件总长
                 val covered = t.chunks.sumOf { it.length }
                 val actual = runCatching { sink.length() }.getOrDefault(-1L)
@@ -327,9 +339,27 @@ object Engine {
                         com.fanxing.xbox.store.AppLog.e("DL", "MediaStore 发布失败 ${t.name}")
                     }
                 }
-            } else {
+                    break
+                }
+
+                // 全部未下且都是 4xx：换单连接直下（不带 Range 由 fetchChunk 内部处理）
+                if (pass == 1 && t.chunks.isNotEmpty() &&
+                    t.chunks.none { it.finished } && t.lastHttp in 400..499
+                ) {
+                    com.fanxing.xbox.store.AppLog.w(
+                        "DL", "全部分片被 HTTP ${t.lastHttp} 拒绝，降级为单连接直下重试一次"
+                    )
+                    t.chunks.clear()
+                    t.chunks.add(Chunk(0, 0, t.size - 1))
+                    continue
+                }
+
                 t.state = State.ERROR
-                t.error = "部分分片未完成"
+                t.error = if (t.failCount > 0 && t.lastHttp > 0)
+                    "直链被拒（HTTP ${t.lastHttp}），已尝试 ${t.sources.size} 条线路仍失败。" +
+                        "可能链接已失效或账号状态异常，建议删除任务重新解析下载"
+                else "部分分片未完成"
+                break
             }
         } finally {
             tick.cancelAndJoin()
@@ -402,6 +432,7 @@ object Engine {
     private suspend fun fetchChunk(t: Task, c: Chunk, sink: Sink) {
         var attempt = 0
         var lastErr = ""
+        var lastCode = 0
         while (!c.finished && !t.cancelFlag.get() && attempt < 6) {
             try {
                 val from = c.start + c.done
@@ -431,8 +462,10 @@ object Engine {
                             return@use   // 不在 inline lambda 里 continue（属实验特性），改由外层处理
                         }
                         val snippet = runCatching {
-                            r.peekBody(200).string()
+                            r.peekBody(900).string()
                         }.getOrDefault("")
+                        lastCode = r.code
+                        t.lastHttp = r.code
                         com.fanxing.xbox.store.AppLog.e(
                             "DL", "片${c.index} HTTP ${r.code} 源=${c.srcIdx + 1}/${t.sources.size} 响应=${snippet.ifBlank { "(空)" }}"
                         )
@@ -483,6 +516,8 @@ object Engine {
             }
         }
         if (!c.finished && !t.cancelFlag.get()) {
+            t.failCount++
+            if (lastCode != 0) t.lastHttp = lastCode
             com.fanxing.xbox.store.AppLog.e(
                 "DL", "分片 ${c.index} 重试 $attempt 次后仍失败：${lastErr}"
             )

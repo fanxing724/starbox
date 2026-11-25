@@ -213,7 +213,12 @@ class ParseFragment : Fragment() {
                 try {
                     com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链 ${f.name} size=${f.size} personal=${f.meta["personal"] ?: "0"}")
                     val link = withContext(Dispatchers.IO) { d.link(sh, f) }
-                    com.fanxing.xbox.store.AppLog.i("Link", "${d.id} 取链成功 节点数=${if (CredsHolder.useMirror) link.mirrors.size + 1 else 1}")
+                    val host = runCatching { java.net.URI(link.url).host }.getOrNull() ?: "?"
+                    com.fanxing.xbox.store.AppLog.i(
+                        "Link",
+                        "${d.id} 取链成功 节点数=${if (CredsHolder.useMirror) link.mirrors.size + 1 else 1} " +
+                            "备用链=${link.alternates.size} CDN=${host}"
+                    )
                     // 主链 + CDN 镜像 + 备用整链（夸克快传/普通两条线路）
                     val sources = buildList {
                         add(link.url)
