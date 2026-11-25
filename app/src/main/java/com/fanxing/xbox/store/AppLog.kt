@@ -35,7 +35,12 @@ object AppLog {
     /** 脱敏：Cookie/Token/签名参数一律打码，避免日志泄露凭据 */
     private fun redact(s: String): String {
         var out = s
-        out = out.replace(Regex("(?i)(cookie|authorization|__pugs|__puus|__pus|stoken|access_token|share_fid_token|captcha_token|BDUSS|p_skey)\\s*[=:]\\s*[^\\s,;\"}]+"), "$1=***")
+        // 只打码「像令牌」的值：长度>=8 且不含中文/空白，
+        // 否则会把「含__pugs=是」这种自己的诊断文案也替换掉
+        out = out.replace(
+            Regex("(?i)(cookie|authorization|__pugs|__puus|__pus|stoken|access_token|share_fid_token|captcha_token|BDUSS|p_skey)\\s*[=:]\\s*([A-Za-z0-9._~%+*\\-]{8,})"),
+            "$1=***"
+        )
         // 签名 URL 的查询串整体打码，只留 host+path
         out = out.replace(Regex("(https?://[^\\s?]+)\\?[^\\s]+"), "$1?<query已省略>")
         return out

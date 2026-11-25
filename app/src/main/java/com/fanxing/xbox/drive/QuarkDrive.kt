@@ -209,6 +209,9 @@ class QuarkDrive : Drive {
             .header("Referer", "https://pan.quark.cn/")
             .header("Content-Type", "application/json;charset=UTF-8")
         Http.api.newCall(b.build()).execute().use { r ->
+            // ★ 必须捕获：__pugs 是 file/download 响应里 Set-Cookie 下发的，
+            //   漏了它 CDN 直接 412。这里不接住，令牌就随响应一起丢了。
+            capturePugs(r.headers("Set-Cookie"))
             val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
             val j = runCatching { JSONObject(txt) }.getOrElse {
                 com.fanxing.xbox.store.AppLog.e("Quark", "响应非 JSON HTTP ${r.code} body=${txt.take(200)}")
@@ -229,6 +232,7 @@ class QuarkDrive : Drive {
             .header("User-Agent", uaPcNew)
             .header("Referer", "https://pan.quark.cn/")
         Http.api.newCall(b.build()).execute().use { r ->
+            capturePugs(r.headers("Set-Cookie"))
             val txt = r.body?.string() ?: throw DriveError("夸克：空响应")
             return runCatching { JSONObject(txt) }.getOrElse {
                 throw DriveError("夸克：响应非 JSON（HTTP ${r.code}）")
